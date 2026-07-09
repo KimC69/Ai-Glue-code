@@ -230,7 +230,15 @@ def lancer_studio():
     print(f"  Scripts générés  : agents/output/")
     print("  Les 5 agents ont livré : vision, structure, scénario,")
     print("  scène Blender et setup Unreal Engine.")
-    print("\n  ✅ Bonne production !\n")
+    print("\n  ✅ Bonne production !")
+
+    # ── 14. COMMANDES HEADLESS PRÊTES À L'EMPLOI ─────────────────────────────
+    module_headless = _charger_agent("utils_headless.py")
+    module_headless.afficher_commandes_headless(
+        blender_path=blender["saved_path"],
+        unreal_path=unreal["saved_path"],
+    )
+    print()
 
 
 if __name__ == "__main__":
