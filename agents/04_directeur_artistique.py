@@ -1,7 +1,7 @@
 """
-Agent 04 — Directeur Artistique (Blender)
-Rôle : Générer un script Python prêt à exécuter dans Blender.
-Reçoit le scénario → produit du code Blender 100% fonctionnel.
+04_directeur_artistique.py — Agent 04 : Directeur Artistique (Blender)
+Rôle : Générer un script Python prêt à exécuter dans Blender 3.x/4.x.
+Expose la classe DirecteurArtistique avec la méthode creer_scene_blender().
 """
 
 import os
@@ -12,8 +12,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain.output_parsers import OutputFixingParser
 from langchain_core.exceptions import OutputParserException
-from langchain_core.tools import tool
-from shared_state import ProjectState, ArtDirectorOutput
+from shared_state import ArtDirectorOutput
 
 
 SYSTEM_PROMPT = """Tu es un Directeur Artistique et expert Blender Python (bpy).
@@ -21,153 +20,175 @@ Tu génères UNIQUEMENT du code Python valide pour Blender 3.x/4.x via l'API bpy
 Ton code est commenté, modulaire et directement exécutable dans le Script Editor de Blender.
 
 Règles absolues :
-- Tout code commence par : import bpy
-- Nettoie la scène en début de script : bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete()
+- Le script commence toujours par : import bpy
+- Nettoie la scène en début de script :
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
 - Utilise des noms de variables explicites en anglais
-- Ajoute des commentaires pour chaque section importante
-- Le code doit être autonome (pas d'imports externes hors bpy)
+- Commente chaque section importante du code
+- Aucun import externe hormis bpy
 
 Tu dois répondre UNIQUEMENT avec le JSON demandé — aucun texte avant ou après.
 """
 
-USER_PROMPT = """Extrait de scénario : {screenplay_excerpt}
+USER_PROMPT = """Extrait de scénario :
+{screenplay_excerpt}
 
-Style visuel (genre : {genre}, ton : {tone}) :
-- Éclairage dramatique adapté au genre
-- Géométries et décors représentatifs de l'univers
-- Matériaux et shaders appropriés
+Fiches personnages :
+{character_sheet}
 
-Fournis exactement :
-- visual_style : description du style visuel, palette, ambiance lumineuse (2-3 phrases)
-- blender_script : script Python Blender complet (commence obligatoirement par "import bpy")
-- filename : nom du fichier Python à créer (ex: scene_01_opening.py)
+Genre : {genre} | Ton : {tone}
+
+Génère exactement :
+- visual_style : description du style visuel, palette de couleurs et ambiance lumineuse (3-4 phrases)
+- blender_script : script Python Blender complet pour recréer la scène d'ouverture
+  (décors, lumières, caméra, matériaux — au moins 60 lignes de code)
+- filename : nom du fichier à créer (ex: scene_01_opening.py)
 
 {format_instructions}"""
 
 
-def _sanitize_filename(filename: str, allowed_ext: tuple = (".py",)) -> str:
+def _securiser_nom_fichier(filename: str) -> str:
     """
-    Nettoie un nom de fichier généré par le LLM pour éviter les traversals de répertoire.
-    
-    - Prend uniquement le basename (supprime les chemins relatifs ../../../)
-    - Supprime les caractères dangereux
-    - Garantit l'extension autorisée
-    
-    Args:
-        filename: Nom de fichier brut venant du LLM
-        allowed_ext: Extensions autorisées
-
-    Returns:
-        Nom de fichier sûr et valide
+    Nettoie un nom de fichier généré par le LLM.
+    Bloque les traversals de répertoire (../) et les caractères dangereux.
+    Force l'extension .py
     """
-    # Prendre uniquement le basename pour bloquer ../../../etc
+    # Prend uniquement le basename pour bloquer ../../../etc
     safe = os.path.basename(filename)
-    # Supprimer tout caractère non alphanumérique, tiret ou underscore (hors extension)
+    # Supprime tout caractère non alphanumérique, tiret ou underscore
     safe = re.sub(r"[^\w\-.]", "_", safe)
-    # Vérifier et forcer l'extension
-    _, ext = os.path.splitext(safe)
-    if ext not in allowed_ext:
-        safe = safe + allowed_ext[0]
-    # Limiter la longueur
-    if len(safe) > 80:
-        safe = safe[:76] + allowed_ext[0]
-    return safe
+    # Force l'extension .py
+    name, ext = os.path.splitext(safe)
+    if ext != ".py":
+        safe = name + ".py"
+    # Limite la longueur
+    return safe[:80] if len(safe) > 80 else safe
 
 
-@tool
-def save_blender_script(filename: str, code: str) -> str:
+class DirecteurArtistique:
     """
-    Outil LangChain : Sauvegarde un script Blender dans le dossier output/.
+    Agent 04 — Directeur Artistique (Blender).
 
-    Args:
-        filename: Nom du fichier .py à créer
-        code: Contenu du script Python Blender
+    Lit le scénario dans WorldState, produit un script Python Blender
+    complet et le sauvegarde dans output/.
 
-    Returns:
-        Chemin complet du fichier créé
+    Usage :
+        da = DirecteurArtistique()
+        resultat = da.creer_scene_blender(
+            screenplay_excerpt="INT. CAPSULE - NUIT\\nElara regarde par le hublot...",
+            character_sheet="ELARA, 34 ans, astronaute...",
+            genre="Science-fiction contemplative",
+            tone="Sombre, poétique"
+        )
+        # resultat["visual_style"], resultat["blender_script"], resultat["saved_path"]
     """
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-    os.makedirs(output_dir, exist_ok=True)
 
-    safe_filename = _sanitize_filename(filename, allowed_ext=(".py",))
-    filepath = os.path.join(output_dir, safe_filename)
+    def __init__(self, model: str = "gpt-4o", temperature: float = 0.4):
+        # gpt-4o par défaut ici : la génération de code bénéficie d'un modèle plus puissant
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("\n⚠️  OPENAI_API_KEY manquante.")
+            print("   Copiez .env.example en .env et ajoutez votre clé OpenAI.")
+            sys.exit(1)
 
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(code)
+        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
 
-    return f"Script Blender sauvegardé : {filepath}"
+        base_parser = PydanticOutputParser(pydantic_object=ArtDirectorOutput)
+        self.parser = OutputFixingParser.from_llm(parser=base_parser, llm=self.llm)
+        self.base_parser = base_parser
 
+        self.prompt = ChatPromptTemplate.from_messages([
+            ("system", SYSTEM_PROMPT),
+            ("human", USER_PROMPT),
+        ]).partial(format_instructions=base_parser.get_format_instructions())
 
-def _check_api_key() -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("\n⚠️  OPENAI_API_KEY manquante. Copiez .env.example en .env et ajoutez votre clé.")
-        sys.exit(1)
-    return api_key
+    def creer_scene_blender(
+        self,
+        screenplay_excerpt: str,
+        character_sheet: str,
+        genre: str,
+        tone: str,
+    ) -> dict:
+        """
+        Génère et sauvegarde le script Python Blender de la scène d'ouverture.
 
+        Args:
+            screenplay_excerpt : Extrait de scénario (sortie Agent 03)
+            character_sheet    : Fiches personnages (sortie Agent 03)
+            genre              : Genre du film (sortie Agent 01)
+            tone               : Ton du film (sortie Agent 01)
 
-def invoke(state: ProjectState, llm: ChatOpenAI) -> ProjectState:
-    """
-    Invoque l'Agent 04 et sauvegarde le script Blender généré.
+        Returns:
+            {
+              "visual_style"  : str,   # description du style visuel
+              "blender_script": str,   # code Python Blender complet
+              "saved_path"    : str,   # chemin du fichier .py sauvegardé
+            }
 
-    Args:
-        state: L'état contenant le scénario et le style
-        llm: Le modèle LLM partagé
+        Raises:
+            RuntimeError : Si le LLM échoue à produire une réponse valide
+        """
+        chain = self.prompt | self.llm | self.parser
 
-    Returns:
-        L'état enrichi avec le script Blender et le style visuel
+        try:
+            response: ArtDirectorOutput = chain.invoke({
+                "screenplay_excerpt": screenplay_excerpt,
+                "character_sheet":   character_sheet,
+                "genre":             genre,
+                "tone":              tone,
+            })
+        except (OutputParserException, Exception) as e:
+            raise RuntimeError(f"[Agent 04] Échec de la génération Blender : {e}") from e
 
-    Raises:
-        RuntimeError: Si le parsing échoue après tentative de correction
-    """
-    base_parser = PydanticOutputParser(pydantic_object=ArtDirectorOutput)
-    parser = OutputFixingParser.from_llm(parser=base_parser, llm=llm)
+        # Sauvegarde sécurisée du script
+        saved_path = self._sauvegarder(response.filename, response.blender_script)
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
-        ("human", USER_PROMPT),
-    ]).partial(format_instructions=base_parser.get_format_instructions())
+        self._last_visual_style   = response.visual_style
+        self._last_blender_script = response.blender_script
+        self._last_saved_path     = saved_path
 
-    chain = prompt | llm | parser
+        return {
+            "visual_style":   response.visual_style,
+            "blender_script": response.blender_script,
+            "saved_path":     saved_path,
+        }
 
-    print("\n[Agent 04 - Directeur Artistique] Génération du script Blender...")
-    try:
-        response: ArtDirectorOutput = chain.invoke({
-            "screenplay_excerpt": state.screenplay_excerpt,
-            "genre": state.genre,
-            "tone": state.tone,
-        })
-    except (OutputParserException, Exception) as e:
-        raise RuntimeError(f"[Agent 04] Échec du parsing : {e}") from e
+    def _sauvegarder(self, filename: str, code: str) -> str:
+        """Sauvegarde le script Blender dans agents/output/ de façon sécurisée."""
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+        os.makedirs(output_dir, exist_ok=True)
 
-    # Propagation directe depuis le schéma structuré
-    state.visual_style = response.visual_style
-    state.blender_script = response.blender_script
+        safe_filename = _securiser_nom_fichier(filename)
+        filepath = os.path.join(output_dir, safe_filename)
 
-    # Sauvegarde sécurisée du script via l'outil LangChain
-    result = save_blender_script.invoke({
-        "filename": response.filename,
-        "code": response.blender_script,
-    })
-    print(f"[Agent 04 ✓] {result}")
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(code)
 
-    return state
+        return filepath
+
+    def afficher_resultat(self) -> str:
+        """Retourne un résumé formaté du dernier appel à creer_scene_blender()."""
+        return (
+            f"STYLE VISUEL :\n{getattr(self, '_last_visual_style', '—')}\n\n"
+            f"SCRIPT BLENDER sauvegardé → {getattr(self, '_last_saved_path', '—')}\n"
+            f"(Aperçu — 10 premières lignes) :\n"
+            + "\n".join(getattr(self, "_last_blender_script", "").splitlines()[:10])
+        )
 
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
 
-    llm = ChatOpenAI(
-        model="gpt-4o",
-        temperature=0.4,
-        api_key=_check_api_key(),
-    )
-    test_state = ProjectState(
-        screenplay_excerpt="INT. CAPSULE SUBMERSIBLE - NUIT\nELARA regarde par le hublot. Des lumières bioluminescentes tourbillonnent dans les profondeurs.",
+    da = DirecteurArtistique()
+    da.creer_scene_blender(
+        screenplay_excerpt=(
+            "INT. CAPSULE SUBMERSIBLE - NUIT\n"
+            "ELARA (34 ans) regarde par le hublot. Des lumières bioluminescentes tourbillonnent."
+        ),
+        character_sheet="ELARA, 34 ans, astronaute solitaire. Motivation : comprendre. Faille : incapacité à lâcher prise.",
         genre="Science-fiction contemplative",
         tone="Sombre, poétique, métaphysique",
     )
-    result = invoke(test_state, llm)
-    print(f"\nStyle Visuel:\n{result.visual_style}")
-    print(f"\nScript Blender (200 premiers caractères):\n{result.blender_script[:200]}")
+    print(da.afficher_resultat())

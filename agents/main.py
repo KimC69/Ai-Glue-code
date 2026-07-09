@@ -159,7 +159,38 @@ def lancer_studio():
     print("\n--- SCÉNARIO VALIDÉ ET ENREGISTRÉ ---")
     print(scribe.afficher_scenario())
     print(f"\n[Système] : État sauvegardé → {saved_path}")
-    print("[Système] : En attente de l'Agent 04 (Directeur Artistique / Blender)...")
+
+    # ── 9. L'ACTION DE L'AGENT 04 ─────────────────────────────────────────────
+    module_04 = _charger_agent("04_directeur_artistique.py")
+    DirecteurArtistique = module_04.DirecteurArtistique
+
+    print("\n[Système] : Génération de la scène Blender par le Directeur Artistique...")
+    da = DirecteurArtistique()
+
+    try:
+        blender = da.creer_scene_blender(
+            screenplay_excerpt=state.get("screenplay_excerpt"),
+            character_sheet=state.get("character_sheet"),
+            genre=state.get("genre"),
+            tone=state.get("tone"),
+        )
+    except RuntimeError as e:
+        print(f"\n❌ {e}")
+        print("\nConseils :")
+        print("  - Réessayez (les réponses LLM varient légèrement)")
+        print("  - Utilisez --model gpt-4o pour de meilleures réponses de code")
+        print("  - Vérifiez votre quota sur platform.openai.com/usage")
+        sys.exit(1)
+
+    # ── 10. SAUVEGARDE DANS LA MÉMOIRE ────────────────────────────────────────
+    state.update("visual_style",   blender["visual_style"])
+    state.update("blender_script", blender["blender_script"])
+    saved_path = state.save()
+
+    print("\n--- SCÈNE BLENDER GÉNÉRÉE ET ENREGISTRÉE ---")
+    print(da.afficher_resultat())
+    print(f"\n[Système] : État sauvegardé → {saved_path}")
+    print("[Système] : En attente de l'Agent 05 (Directeur Technique / Unreal)...")
 
 
 if __name__ == "__main__":
