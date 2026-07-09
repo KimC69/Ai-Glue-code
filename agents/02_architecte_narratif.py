@@ -62,7 +62,6 @@ class ArchitecteNarratif:
         self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
 
         base_parser = PydanticOutputParser(pydantic_object=NarrativeOutput)
-        # OutputFixingParser : si le JSON est malformé, le LLM se corrige seul
         self.parser = OutputFixingParser.from_llm(parser=base_parser, llm=self.llm)
         self.base_parser = base_parser
 
@@ -71,25 +70,17 @@ class ArchitecteNarratif:
             ("human", USER_PROMPT),
         ]).partial(format_instructions=base_parser.get_format_instructions())
 
-    def construire_structure(
-        self,
-        vision_globale: str,
-        genre: str,
-        tone: str,
-    ) -> dict:
+    def construire_structure(self, vision_globale: str, genre: str, tone: str) -> dict:
         """
-        Génère la structure narrative complète à partir de la vision du Directeur.
+        Génère la structure narrative complète.
 
         Args:
             vision_globale : Texte complet de la vision du Directeur Créatif
-            genre          : Genre cinématographique (ex: "Science-fiction contemplative")
-            tone           : Ton du film (ex: "Sombre, poétique")
+            genre          : Genre cinématographique
+            tone           : Ton du film
 
         Returns:
-            Dictionnaire avec les clés :
-                - synopsis   : résumé de l'histoire (100-150 mots)
-                - acts       : structure en 3 actes
-                - key_scenes : 3 scènes clés détaillées
+            {"synopsis": str, "acts": str, "key_scenes": str}
 
         Raises:
             RuntimeError : Si le LLM échoue à produire une réponse valide
@@ -105,14 +96,13 @@ class ArchitecteNarratif:
         except (OutputParserException, Exception) as e:
             raise RuntimeError(f"[Agent 02] Échec de la construction narrative : {e}") from e
 
-        # Formatage lisible pour affichage terminal
-        self._last_synopsis = response.synopsis
-        self._last_acts = response.acts
+        self._last_synopsis   = response.synopsis
+        self._last_acts       = response.acts
         self._last_key_scenes = response.key_scenes
 
         return {
-            "synopsis": response.synopsis,
-            "acts": response.acts,
+            "synopsis":   response.synopsis,
+            "acts":       response.acts,
             "key_scenes": response.key_scenes,
         }
 
@@ -130,15 +120,9 @@ if __name__ == "__main__":
     load_dotenv()
 
     architecte = ArchitecteNarratif()
-    resultat = architecte.construire_structure(
-        vision_globale=(
-            "GENRE   : Science-fiction contemplative\n"
-            "TON     : Sombre, poétique, métaphysique\n"
-            "VISION  : Un film sur la solitude du contact avec l'inconnu. "
-            "Inspiré de Premier Contact et Annihilation."
-        ),
+    architecte.construire_structure(
+        vision_globale="GENRE : Sci-fi contemplative\nTON : Sombre\nVISION : Film sur la solitude du contact.",
         genre="Science-fiction contemplative",
-        tone="Sombre, poétique, métaphysique",
+        tone="Sombre, poétique",
     )
-    print("\n--- Structure Narrative ---")
     print(architecte.afficher_structure())

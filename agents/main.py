@@ -130,7 +130,36 @@ def lancer_studio():
     print("\n--- STRUCTURE NARRATIVE VALIDÉE ET ENREGISTRÉE ---")
     print(architecte.afficher_structure())
     print(f"\n[Système] : État sauvegardé → {saved_path}")
-    print("[Système] : En attente de l'Agent 03 (Scénariste)...")
+
+    # ── 7. L'ACTION DE L'AGENT 03 ─────────────────────────────────────────────
+    module_03 = _charger_agent("03_scenariste.py")
+    Scenariste = module_03.Scenariste
+
+    print("\n[Système] : Écriture du scénario par le Scénariste...")
+    scribe = Scenariste()
+
+    try:
+        scenario = scribe.ecrire_scenario(
+            synopsis=state.get("synopsis"),
+            acts=state.get("acts"),
+            key_scenes=state.get("key_scenes"),
+        )
+    except RuntimeError as e:
+        print(f"\n❌ {e}")
+        print("\nConseils :")
+        print("  - Réessayez (les réponses LLM varient légèrement)")
+        print("  - Vérifiez votre quota sur platform.openai.com/usage")
+        sys.exit(1)
+
+    # ── 8. SAUVEGARDE DANS LA MÉMOIRE ─────────────────────────────────────────
+    state.update("character_sheet",    scenario["character_sheet"])
+    state.update("screenplay_excerpt", scenario["screenplay_excerpt"])
+    saved_path = state.save()
+
+    print("\n--- SCÉNARIO VALIDÉ ET ENREGISTRÉ ---")
+    print(scribe.afficher_scenario())
+    print(f"\n[Système] : État sauvegardé → {saved_path}")
+    print("[Système] : En attente de l'Agent 04 (Directeur Artistique / Blender)...")
 
 
 if __name__ == "__main__":
