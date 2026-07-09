@@ -51,6 +51,78 @@ def commande_gimp_headless(script_path: str) -> str:
     return f"gimp -i -b - < {rel_path}"
 
 
+def commande_inkscape_headless(notes_path: str) -> str:
+    """
+    L'Agent 06 fournit des notes décrivant l'illustration à créer, pas un
+    fichier .svg déjà construit. On affiche donc la marche à suivre : créer
+    le SVG à partir des notes, puis l'exporter en PNG/PDF sans interface.
+
+    Args:
+        notes_path : Chemin vers les notes d'illustration générées
+
+    Returns:
+        Un texte d'instructions (pas une commande one-shot)
+    """
+    rel_path = os.path.relpath(notes_path)
+    return (
+        f"1. Créez le fichier illustration.svg à partir des instructions dans {rel_path}\n"
+        f"       2. Exportez-le sans ouvrir l'interface :\n"
+        f"          inkscape illustration.svg --export-type=png --export-filename=illustration.png"
+    )
+
+
+def commande_darktable_headless(notes_path: str) -> str:
+    """
+    Construit la commande pour développer un fichier RAW en ligne de commande.
+
+    Args:
+        notes_path : Chemin vers les notes de développement générées
+
+    Returns:
+        Un texte d'instructions (le fichier RAW source n'est pas généré par le studio)
+    """
+    rel_path = os.path.relpath(notes_path)
+    return (
+        f"1. Consultez les réglages recommandés dans {rel_path}\n"
+        f"       2. Développez en ligne de commande :\n"
+        f"          darktable-cli photo_source.raw sortie.jpg"
+    )
+
+
+def commande_krita_headless(script_path: str) -> str:
+    """
+    Construit la commande pour exécuter un script Python (API Krita) en
+    mode batch, sans ouvrir l'interface graphique.
+
+    Args:
+        script_path : Chemin vers le script généré par l'Agent 06
+
+    Returns:
+        La commande shell prête à copier-coller
+    """
+    rel_path = os.path.relpath(script_path)
+    return f"krita --nosplash -b {rel_path}"
+
+
+def commande_obs_headless(notes_path: str) -> str:
+    """
+    Construit la commande pour démarrer un enregistrement OBS sans ouvrir
+    l'interface (nécessite un profil/une scène déjà configurés dans OBS).
+
+    Args:
+        notes_path : Chemin vers les notes de configuration générées
+
+    Returns:
+        Un texte d'instructions
+    """
+    rel_path = os.path.relpath(notes_path)
+    return (
+        f"1. Configurez la scène OBS selon {rel_path}\n"
+        f"       2. Lancez l'enregistrement sans interface :\n"
+        f"          obs --startrecording --minimize-to-tray"
+    )
+
+
 def commande_montage_headless(notes_path: str) -> str:
     """
     Le montage (Kdenlive/Shotcut) n'a pas de vrai mode headless : les deux
@@ -84,18 +156,26 @@ def afficher_commandes_headless(
     unreal_path: str,
     gimp_path: str = "",
     montage_notes_path: str = "",
+    inkscape_notes_path: str = "",
+    darktable_notes_path: str = "",
+    krita_path: str = "",
+    obs_notes_path: str = "",
 ) -> None:
     """
     Affiche un bloc récapitulatif avec les commandes headless à copier-coller.
-    N'affiche les commandes GIMP / montage que si l'Agent 06 les a jugées
-    nécessaires (gimp_path / montage_notes_path non vides) — aucun outil
-    n'est proposé si le résultat est déjà conforme.
+    N'affiche les commandes des outils annexes que si l'Agent 06 les a jugés
+    nécessaires (chemin non vide) — aucun outil n'est proposé si le résultat
+    est déjà conforme.
 
     Args:
-        blender_path       : Chemin du script Blender généré (toujours affiché)
-        unreal_path        : Chemin du script Unreal généré (toujours affiché)
-        gimp_path          : Chemin du script GIMP, vide si retouche non nécessaire
-        montage_notes_path : Chemin des notes de montage, vide si non nécessaire
+        blender_path         : Chemin du script Blender généré (toujours affiché)
+        unreal_path          : Chemin du script Unreal généré (toujours affiché)
+        gimp_path            : Chemin du script GIMP, vide si non nécessaire
+        montage_notes_path   : Chemin des notes de montage, vide si non nécessaire
+        inkscape_notes_path  : Chemin des notes Inkscape, vide si non nécessaire
+        darktable_notes_path : Chemin des notes Darktable, vide si non nécessaire
+        krita_path           : Chemin du script Krita, vide si non nécessaire
+        obs_notes_path       : Chemin des notes OBS, vide si non nécessaire
     """
     print("\n" + "─" * 60)
     print("  ▶ COMMANDES PRÊTES À L'EMPLOI (mode headless)")
@@ -117,6 +197,26 @@ def afficher_commandes_headless(
     if montage_notes_path:
         print("\n  Montage vidéo (jugé nécessaire par le Superviseur Post-Production) :")
         print(f"    {commande_montage_headless(montage_notes_path)}")
+
+    if inkscape_notes_path:
+        print("\n  Inkscape (illustration jugée nécessaire par le Superviseur Post-Production) :")
+        print(f"    {commande_inkscape_headless(inkscape_notes_path)}")
+        _verifier_outil("inkscape", "Inkscape")
+
+    if darktable_notes_path:
+        print("\n  Darktable (développement RAW jugé nécessaire) :")
+        print(f"    {commande_darktable_headless(darktable_notes_path)}")
+        _verifier_outil("darktable-cli", "Darktable")
+
+    if krita_path:
+        print("\n  Krita (dessin numérique jugé nécessaire) :")
+        print(f"    {commande_krita_headless(krita_path)}")
+        _verifier_outil("krita", "Krita")
+
+    if obs_notes_path:
+        print("\n  OBS Studio (capture/streaming jugée nécessaire) :")
+        print(f"    {commande_obs_headless(obs_notes_path)}")
+        _verifier_outil("obs", "OBS Studio")
 
     print("\n" + "─" * 60)
 

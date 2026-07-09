@@ -94,19 +94,27 @@ Python n'autorise pas `import 01_...` directement.
 
 Ce dernier agent n'exécute jamais un outil "juste au cas où". Il audite le
 résultat des Agents 04/05 et ne déclenche que ce qui est réellement
-nécessaire :
+nécessaire, parmi 6 logiciels open source :
 
-- **GIMP** (retouche image) — uniquement si un écart visuel doit être corrigé.
-  Un script Python-Fu est sauvegardé dans `output/retouche_gimp.py`.
-- **Kdenlive / Shotcut** (montage) — uniquement si un assemblage est requis
-  pour rendre le rendu final conforme. Les instructions sont sauvegardées
-  dans `output/notes_montage.txt` (ces logiciels n'ont pas de vrai mode
-  headless : ils reposent sur le moteur MLT, d'où l'usage de `melt` pour un
-  rendu automatisé une fois le projet construit).
+| Outil | Usage | Déclenché quand... | Sortie |
+|---|---|---|---|
+| **GIMP** | Retouche image | un écart visuel doit être corrigé | `output/retouche_gimp.py` (Python-Fu, exécutable en batch) |
+| **Kdenlive / Shotcut** | Montage vidéo | un assemblage est requis pour rendre le rendu final conforme | `output/notes_montage.txt` |
+| **Inkscape** | Illustration vectorielle | une affiche, un logo ou un titre stylisé est nécessaire | `output/notes_inkscape.txt` |
+| **Darktable** | Développement RAW | des textures/références haute qualité manquent de réalisme | `output/notes_darktable.txt` |
+| **Krita** | Dessin/peinture numérique | un concept art ou matte painting est requis | `output/concept_krita.py` (API Krita, exécutable en batch) |
+| **OBS Studio** | Capture/streaming | le rendu final doit être capturé en direct | `output/notes_obs.txt` |
+
+Kdenlive/Shotcut, Inkscape, Darktable et OBS n'ont pas de vrai mode headless
+"un clic" (Kdenlive/Shotcut reposent sur le moteur MLT, `melt` permet un rendu
+automatisé une fois le projet construit ; les autres nécessitent une scène ou
+un profil déjà configuré) — le studio sauvegarde donc des notes d'instructions
+claires plutôt qu'une commande one-shot pour ces cas.
 
 Si le résultat est déjà cohérent, aucun outil n'est proposé — seuls
 Blender et Unreal Engine (déjà générés par les Agents 04/05) apparaissent
-dans le récapitulatif final.
+dans le récapitulatif final. La majorité des projets n'auront besoin que
+d'un sous-ensemble de ces outils, voire d'aucun.
 
 ## Tester un agent seul
 

@@ -248,12 +248,16 @@ def lancer_studio():
         print("   L'audit de conformité a échoué — le pipeline continue sans lui.")
 
     if audit is not None:
-        state.update("coherence_score", audit["coherence_score"])
-        state.update("issues", audit["issues"])
-        state.update("needs_gimp_retouching", audit["needs_gimp_retouching"])
-        state.update("gimp_script", audit["gimp_script"])
-        state.update("needs_video_editing", audit["needs_video_editing"])
-        state.update("video_editing_notes", audit["video_editing_notes"])
+        for cle in (
+            "coherence_score", "issues",
+            "needs_gimp_retouching", "gimp_script",
+            "needs_video_editing", "video_editing_notes",
+            "needs_inkscape", "inkscape_notes",
+            "needs_darktable", "darktable_notes",
+            "needs_krita", "krita_script",
+            "needs_obs", "obs_notes",
+        ):
+            state.update(cle, audit[cle])
         saved_path = state.save()
 
         print("\n--- AUDIT DE CONFORMITÉ ---")
@@ -273,25 +277,56 @@ def lancer_studio():
 
     # ── 15. COMMANDES HEADLESS PRÊTES À L'EMPLOI ─────────────────────────────
     module_headless = _charger_agent("utils_headless.py")
+    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+
+    def _ecrire_notes_si_necessaire(actif: bool, contenu: str, nom_fichier: str) -> str:
+        """Écrit les notes d'un outil "instructions" (pas de script direct) dans
+        un fichier, uniquement si l'Agent 06 l'a jugé nécessaire. Retourne le
+        chemin, ou '' si non nécessaire."""
+        if not actif or not contenu:
+            return ""
+        os.makedirs(output_dir, exist_ok=True)
+        filepath = os.path.join(output_dir, nom_fichier)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(contenu)
+        return filepath
 
     gimp_path = ""
+    krita_path = ""
     montage_notes_path = ""
-    if audit is not None and audit["needs_gimp_retouching"]:
-        gimp_path = audit["gimp_saved_path"]
-    if audit is not None and audit["needs_video_editing"]:
-        # Les notes de montage sont écrites dans un fichier pour être consultées
-        # avant l'ouverture de Kdenlive/Shotcut (pas de vrai mode headless).
-        montage_notes_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "output", "notes_montage.txt"
+    inkscape_notes_path = ""
+    darktable_notes_path = ""
+    obs_notes_path = ""
+
+    if audit is not None:
+        if audit["needs_gimp_retouching"]:
+            gimp_path = audit["gimp_saved_path"]
+        if audit["needs_krita"]:
+            krita_path = audit["krita_saved_path"]
+        # Ces outils n'ont pas de vrai mode headless : on sauvegarde des notes
+        # d'instructions à suivre plutôt qu'un script directement exécutable.
+        montage_notes_path = _ecrire_notes_si_necessaire(
+            audit["needs_video_editing"], audit["video_editing_notes"], "notes_montage.txt"
         )
-        with open(montage_notes_path, "w", encoding="utf-8") as f:
-            f.write(audit["video_editing_notes"])
+        inkscape_notes_path = _ecrire_notes_si_necessaire(
+            audit["needs_inkscape"], audit["inkscape_notes"], "notes_inkscape.txt"
+        )
+        darktable_notes_path = _ecrire_notes_si_necessaire(
+            audit["needs_darktable"], audit["darktable_notes"], "notes_darktable.txt"
+        )
+        obs_notes_path = _ecrire_notes_si_necessaire(
+            audit["needs_obs"], audit["obs_notes"], "notes_obs.txt"
+        )
 
     module_headless.afficher_commandes_headless(
         blender_path=blender["saved_path"],
         unreal_path=unreal["saved_path"],
         gimp_path=gimp_path,
         montage_notes_path=montage_notes_path,
+        inkscape_notes_path=inkscape_notes_path,
+        darktable_notes_path=darktable_notes_path,
+        krita_path=krita_path,
+        obs_notes_path=obs_notes_path,
     )
     print()
 

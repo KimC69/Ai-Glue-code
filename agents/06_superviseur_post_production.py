@@ -20,20 +20,35 @@ from shared_state import PostProductionOutput
 
 SYSTEM_PROMPT = """Tu es le Superviseur Post-Production d'un studio de cinéma virtuel.
 Ton rôle est d'auditer la cohérence entre la vision artistique, le script Blender
-et le setup Unreal Engine produits par les agents précédents.
+et le setup Unreal Engine produits par les agents précédents, et de décider,
+outil par outil, si l'un des logiciels open source suivants doit intervenir :
 
-Tu ne dois recommander un outil correctif QUE s'il y a un vrai problème de
-cohérence (ex : palette de couleurs incohérente avec le ton du film, script
-technique qui ne respecte pas le style visuel décrit, assemblage manquant).
+- GIMP        : retouche photo/image
+- Kdenlive / Shotcut : montage vidéo
+- Inkscape    : illustration vectorielle (logo, affiche, titre stylisé)
+- Darktable   : développement de photos RAW (textures/références haute qualité)
+- Krita       : dessin et peinture numérique (concept art, matte painting)
+- OBS Studio  : capture vidéo / streaming (ex: capture du rendu Unreal)
+
+Tu ne dois recommander un outil QUE s'il y a un vrai besoin justifié par le
+projet (ex : palette de couleurs incohérente avec le ton → GIMP ; le film a
+besoin d'une affiche → Inkscape ; une texture manque de réalisme → Darktable ;
+un plan nécessite un concept art peint → Krita ; le rendu final doit être
+capturé en direct → OBS ; assemblage de plusieurs scènes → Kdenlive/Shotcut).
 
 Règles absolues :
-- Si tout est cohérent : needs_gimp_retouching = false, needs_video_editing = false,
-  gimp_script et video_editing_notes restent vides, issues = "Aucun".
-- N'invente jamais un problème pour justifier un outil inutile.
-- Le script GIMP (si nécessaire) est en Python-Fu (utilise le module gimpfu ou
-  l'API GIMP 3 en Python), commenté et autonome.
-- Les notes de montage (si nécessaires) sont des instructions concrètes et
-  actionnables pour Kdenlive ou Shotcut (coupes, transitions, calage audio).
+- Par défaut, TOUS les needs_* sont false et les champs texte associés vides.
+- N'active un outil que s'il répond à un besoin réel et concret du projet
+  (genre, ton, scènes clés). N'invente jamais un problème pour justifier un
+  outil inutile — la majorité des projets n'auront besoin que d'un sous-ensemble
+  de ces outils, voire d'aucun.
+- Le script GIMP (si nécessaire) est en Python-Fu, commenté et autonome.
+- Les notes de montage (si nécessaires) sont des instructions concrètes pour
+  Kdenlive ou Shotcut (coupes, transitions, calage audio).
+- Le script Krita (si nécessaire) utilise l'API Python Krita (module krita),
+  commenté et autonome.
+- Les notes Inkscape/Darktable/OBS (si nécessaires) sont des instructions
+  concrètes et actionnables, pas des généralités.
 
 Tu dois répondre UNIQUEMENT avec le JSON demandé — aucun texte avant ou après.
 """
@@ -50,11 +65,16 @@ Aperçu script Blender :
 Aperçu script Unreal :
 {unreal_script_preview}
 
-Analyse la cohérence globale entre ces éléments et détermine :
+Analyse la cohérence globale entre ces éléments et détermine, outil par outil,
+si une intervention est réellement nécessaire :
 - coherence_score : score de 0 à 100
 - issues : problèmes identifiés (ou "Aucun")
-- needs_gimp_retouching + gimp_script : uniquement si une retouche visuelle corrige un vrai écart
-- needs_video_editing + video_editing_notes : uniquement si un montage est nécessaire pour rendre le résultat conforme
+- needs_gimp_retouching + gimp_script
+- needs_video_editing + video_editing_notes
+- needs_inkscape + inkscape_notes (affiche, logo, titre stylisé)
+- needs_darktable + darktable_notes (développement RAW de textures/références)
+- needs_krita + krita_script (concept art, matte painting)
+- needs_obs + obs_notes (capture/streaming du rendu)
 
 {format_instructions}"""
 
@@ -115,11 +135,14 @@ class SuperviseurPostProduction:
             {
               "coherence_score": int,
               "issues": str,
-              "needs_gimp_retouching": bool,
-              "gimp_script": str,
-              "needs_video_editing": bool,
-              "video_editing_notes": str,
+              "needs_gimp_retouching": bool, "gimp_script": str, "gimp_saved_path": str,
+              "needs_video_editing": bool,   "video_editing_notes": str,
+              "needs_inkscape": bool,        "inkscape_notes": str,
+              "needs_darktable": bool,       "darktable_notes": str,
+              "needs_krita": bool,           "krita_script": str, "krita_saved_path": str,
+              "needs_obs": bool,             "obs_notes": str,
             }
+            Seuls les outils réellement jugés nécessaires ont un contenu non vide.
 
         Raises:
             RuntimeError : Si le LLM échoue à produire une réponse valide
@@ -141,37 +164,56 @@ class SuperviseurPostProduction:
         except (OutputParserException, Exception) as e:
             raise RuntimeError(f"[Agent 06] Échec de l'analyse de conformité : {e}") from e
 
-        # Validation croisée : si un outil est signalé nécessaire mais que le
-        # contenu associé est vide, on désactive le déclenchement plutôt que
-        # de proposer une commande qui n'exécuterait rien d'utile.
-        needs_gimp = response.needs_gimp_retouching and bool(response.gimp_script.strip())
-        needs_video = response.needs_video_editing and bool(response.video_editing_notes.strip())
-
-        saved_gimp_path = ""
-        if needs_gimp:
-            saved_gimp_path = self._sauvegarder_gimp(response.gimp_script)
-
-        self._last_result = response
-        self._last_needs_gimp = needs_gimp
-        self._last_needs_video = needs_video
-        self._last_saved_gimp_path = saved_gimp_path
-
-        return {
-            "coherence_score":       response.coherence_score,
-            "issues":                response.issues,
-            "needs_gimp_retouching": needs_gimp,
-            "gimp_script":           response.gimp_script if needs_gimp else "",
-            "gimp_saved_path":       saved_gimp_path,
-            "needs_video_editing":   needs_video,
-            "video_editing_notes":   response.video_editing_notes if needs_video else "",
+        # Table de correspondance outil → (drapeau, champ contenu, fichier de sortie).
+        # Centralise la validation croisée : si un outil est signalé nécessaire
+        # mais que son contenu est vide, on désactive le déclenchement plutôt
+        # que de proposer une commande qui n'exécuterait rien d'utile.
+        outils = {
+            "gimp":      ("needs_gimp_retouching", "gimp_script",       "retouche_gimp.py"),
+            "video":     ("needs_video_editing",    "video_editing_notes", None),
+            "inkscape":  ("needs_inkscape",         "inkscape_notes",    None),
+            "darktable": ("needs_darktable",        "darktable_notes",   None),
+            "krita":     ("needs_krita",            "krita_script",      "concept_krita.py"),
+            "obs":       ("needs_obs",              "obs_notes",         None),
         }
 
-    def _sauvegarder_gimp(self, code: str) -> str:
-        """Sauvegarde le script GIMP Python-Fu dans agents/output/."""
+        resultat: dict = {
+            "coherence_score": response.coherence_score,
+            "issues": response.issues,
+        }
+        etat_final: dict = {}
+
+        for _cle, (flag_field, content_field, output_filename) in outils.items():
+            contenu = getattr(response, content_field)
+            actif = getattr(response, flag_field) and bool(contenu.strip())
+
+            saved_path = ""
+            if actif and output_filename:
+                saved_path = self._sauvegarder_script(output_filename, contenu)
+
+            resultat[flag_field] = actif
+            resultat[content_field] = contenu if actif else ""
+            if output_filename:
+                resultat[f"{_cle}_saved_path"] = saved_path
+
+            etat_final[_cle] = actif
+
+        self._last_result = response
+        self._last_etat_outils = etat_final
+        self._last_saved_paths = {
+            k: resultat.get(f"{k}_saved_path", "") for k in outils if outils[k][2]
+        }
+
+        return resultat
+
+    def _sauvegarder_script(self, filename: str, code: str) -> str:
+        """Sauvegarde un script généré (GIMP, Krita, ...) dans agents/output/.
+        Le nom de fichier est fixe (défini en interne, jamais fourni par le LLM),
+        donc aucun risque de traversal de répertoire."""
         output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
         os.makedirs(output_dir, exist_ok=True)
 
-        filepath = os.path.join(output_dir, "retouche_gimp.py")
+        filepath = os.path.join(output_dir, filename)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(code)
         return filepath
@@ -182,21 +224,29 @@ class SuperviseurPostProduction:
         if r is None:
             return "Aucune analyse effectuée."
 
+        etat = getattr(self, "_last_etat_outils", {})
+        paths = getattr(self, "_last_saved_paths", {})
+
         lignes = [
             f"SCORE DE COHÉRENCE : {r.coherence_score}/100",
             f"PROBLÈMES IDENTIFIÉS : {r.issues}",
             "",
         ]
 
-        if getattr(self, "_last_needs_gimp", False):
-            lignes.append(f"🎨 Retouche GIMP nécessaire → {getattr(self, '_last_saved_gimp_path', '—')}")
-        else:
-            lignes.append("🎨 Retouche GIMP : non nécessaire")
+        libelles = {
+            "gimp":      ("🎨 Retouche GIMP", r.gimp_script and paths.get("gimp", "")),
+            "video":     ("🎬 Montage vidéo (Kdenlive/Shotcut)", r.video_editing_notes),
+            "inkscape":  ("✏️  Illustration Inkscape", r.inkscape_notes),
+            "darktable": ("📷 Développement RAW Darktable", r.darktable_notes),
+            "krita":     ("🖌️  Dessin numérique Krita", paths.get("krita", "")),
+            "obs":       ("🎥 Capture/streaming OBS", r.obs_notes),
+        }
 
-        if getattr(self, "_last_needs_video", False):
-            lignes.append(f"🎬 Montage vidéo nécessaire :\n   {r.video_editing_notes}")
-        else:
-            lignes.append("🎬 Montage vidéo (Kdenlive/Shotcut) : non nécessaire")
+        for cle, (label, detail) in libelles.items():
+            if etat.get(cle):
+                lignes.append(f"{label} nécessaire → {detail}" if detail else f"{label} nécessaire")
+            else:
+                lignes.append(f"{label} : non nécessaire")
 
         return "\n".join(lignes)
 

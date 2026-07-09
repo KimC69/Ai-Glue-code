@@ -46,6 +46,14 @@ class WorldState:
             "gimp_script": "",
             "needs_video_editing": "",
             "video_editing_notes": "",
+            "needs_inkscape": "",
+            "inkscape_notes": "",
+            "needs_darktable": "",
+            "darktable_notes": "",
+            "needs_krita": "",
+            "krita_script": "",
+            "needs_obs": "",
+            "obs_notes": "",
             "last_updated": "",
         }
 
@@ -155,3 +163,15 @@ class PostProductionOutput(BaseModel):
 
     needs_video_editing: bool = Field(description="True si un montage (Kdenlive/Shotcut) est nécessaire pour assembler/corriger le rendu final")
     video_editing_notes: str = Field(description="Instructions de montage (coupes, transitions, assemblage), vide si non nécessaire")
+
+    needs_inkscape: bool = Field(description="True si une illustration vectorielle (logo, affiche, titre stylisé) est nécessaire")
+    inkscape_notes: str = Field(description="Instructions/SVG pour Inkscape (ce qu'il faut illustrer), vide si non nécessaire")
+
+    needs_darktable: bool = Field(description="True si un développement RAW est nécessaire (photos de référence/textures haute qualité)")
+    darktable_notes: str = Field(description="Instructions de développement RAW (exposition, balance des blancs, export), vide si non nécessaire")
+
+    needs_krita: bool = Field(description="True si un dessin/peinture numérique est nécessaire (concept art, matte painting, texture peinte)")
+    krita_script: str = Field(description="Script Python (API Krita) ou instructions de dessin, vide si non nécessaire")
+
+    needs_obs: bool = Field(description="True si une capture/streaming est nécessaire (ex: capture du rendu Unreal en temps réel)")
+    obs_notes: str = Field(description="Instructions de configuration OBS (scène, sources, sortie), vide si non nécessaire")
