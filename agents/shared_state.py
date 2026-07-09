@@ -1,47 +1,107 @@
 """
-shared_state.py — Schéma de données partagé entre tous les agents.
-LangChain lit et met à jour cet état à chaque étape de la chaîne.
+shared_state.py — La "Bible de production" partagée entre tous les agents.
+WorldState est la mémoire commune : chaque agent peut y lire et écrire.
 """
 
+import json
+import os
+from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any
 
 
-class ProjectState(BaseModel):
-    """État global du projet cinématographique."""
+# ─── Mémoire commune (WorldState) ─────────────────────────────────────────────
 
-    # Entrée initiale
-    idea: str = Field(default="", description="L'idée de film brute fournie par l'utilisateur")
+class WorldState:
+    """
+    Mémoire partagée entre tous les agents du studio.
+    
+    Utilisation :
+        state = WorldState()
+        state.update("vision_globale", "Un film sous-marin...")
+        state.save()  # → persiste dans output/world_state.json
+    """
 
-    # Sorties de l'Agent 01 — Directeur
-    director_vision: str = Field(default="", description="La vision artistique globale du directeur")
-    genre: str = Field(default="", description="Genre cinématographique (sci-fi, drame, horreur...)")
-    tone: str = Field(default="", description="Ton du film (sombre, épique, poétique...)")
+    SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output", "world_state.json")
 
-    # Sorties de l'Agent 02 — Architecte Narratif
-    synopsis: str = Field(default="", description="Résumé complet de l'histoire")
-    acts: str = Field(default="", description="Structure en actes (setup / confrontation / résolution)")
-    key_scenes: str = Field(default="", description="Scènes clés décrites en détail")
+    def __init__(self):
+        # Données de l'état — chaque agent ajoute sa clé
+        self._data: dict[str, Any] = {
+            "idea": "",
+            "vision_globale": "",
+            "genre": "",
+            "tone": "",
+            "synopsis": "",
+            "acts": "",
+            "key_scenes": "",
+            "character_sheet": "",
+            "screenplay_excerpt": "",
+            "visual_style": "",
+            "blender_script": "",
+            "technical_notes": "",
+            "unreal_script": "",
+            "last_updated": "",
+        }
 
-    # Sorties de l'Agent 03 — Scénariste
-    screenplay_excerpt: str = Field(default="", description="Extrait de scénario formaté (dialogues, actions)")
-    character_sheet: str = Field(default="", description="Fiches personnages avec motivations")
+    def update(self, key: str, value: Any) -> None:
+        """
+        Met à jour une clé de l'état partagé.
+        
+        Args:
+            key: La clé à mettre à jour (ex: "vision_globale")
+            value: La valeur à enregistrer
+        """
+        self._data[key] = value
+        self._data["last_updated"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
-    # Sorties de l'Agent 04 — Directeur Artistique (Blender)
-    blender_script: str = Field(default="", description="Script Python prêt pour Blender")
-    visual_style: str = Field(default="", description="Description du style visuel et de l'ambiance 3D")
+    def get(self, key: str, default: Any = "") -> Any:
+        """
+        Lit une valeur de l'état partagé.
+        
+        Args:
+            key: La clé à lire
+            default: Valeur par défaut si la clé est absente
+        """
+        return self._data.get(key, default)
 
-    # Sorties de l'Agent 05 — Directeur Technique (Unreal)
-    unreal_script: str = Field(default="", description="Script shell/Blueprint pour Unreal Engine")
-    technical_notes: str = Field(default="", description="Notes techniques de production")
+    def save(self) -> str:
+        """
+        Persiste l'état complet dans output/world_state.json.
+        
+        Returns:
+            Chemin du fichier sauvegardé
+        """
+        os.makedirs(os.path.dirname(self.SAVE_PATH), exist_ok=True)
+        with open(self.SAVE_PATH, "w", encoding="utf-8") as f:
+            json.dump(self._data, f, ensure_ascii=False, indent=2)
+        return self.SAVE_PATH
+
+    def load(self) -> bool:
+        """
+        Charge l'état depuis output/world_state.json (si existant).
+        
+        Returns:
+            True si chargé avec succès, False sinon
+        """
+        if os.path.exists(self.SAVE_PATH):
+            with open(self.SAVE_PATH, encoding="utf-8") as f:
+                self._data.update(json.load(f))
+            return True
+        return False
+
+    def to_dict(self) -> dict:
+        """Retourne une copie de l'état complet."""
+        return dict(self._data)
+
+    def __repr__(self) -> str:
+        filled = {k: v for k, v in self._data.items() if v}
+        return f"WorldState({list(filled.keys())})"
 
 
-# ─── Schémas de sortie structurée par agent ──────────────────────────────────
-# Chaque agent dispose de son propre schéma Pydantic avec des champs explicites.
-# Cela rend la propagation d'état déterministe et élimine le parsing heuristique.
+# ─── Schémas de sortie structurée par agent (pour LangChain PydanticOutputParser) ─
 
 class DirectorOutput(BaseModel):
-    """Sortie structurée de l'Agent 01 — Directeur."""
+    """Sortie structurée de l'Agent 01 — Directeur Créatif."""
     genre: str = Field(description="Genre cinématographique précis (ex: science-fiction contemplative)")
     tone: str = Field(description="Ton du film (ex: sombre, épique, poétique, onirique)")
     director_vision: str = Field(description="Vision artistique globale en 3 à 5 phrases")
@@ -72,17 +132,3 @@ class TechDirectorOutput(BaseModel):
     technical_notes: str = Field(description="Notes de production : workflow Blender→Unreal, assets, contraintes")
     unreal_script: str = Field(description="Script Shell ou Python Unreal Engine complet et fonctionnel")
     filename: str = Field(description="Nom du fichier à créer (ex: setup_scene_01.sh)")
-
-
-# ─── Réponses génériques (conservées pour compatibilité) ─────────────────────
-
-class AgentTextResponse(BaseModel):
-    """Format de réponse narrative (texte pur) — usage générique."""
-    content: str = Field(description="Contenu narratif ou conceptuel de l'agent")
-
-
-class AgentCodeResponse(BaseModel):
-    """Format de réponse avec code technique — usage générique."""
-    narrative: str = Field(description="Explication textuelle de ce que fait le code")
-    code: str = Field(description="Code Python (Blender) ou Shell (Unreal), prêt à l'emploi")
-    filename: str = Field(description="Nom du fichier à créer (ex: scene_01_blender.py)")
