@@ -96,7 +96,7 @@ class SuperviseurPostProduction:
         )
     """
 
-    def __init__(self, model: str = "gpt-4o", temperature: float = 0.2):
+    def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2):
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             # Agent 06 est optionnel dans le pipeline (audit de conformité) :
