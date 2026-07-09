@@ -190,7 +190,47 @@ def lancer_studio():
     print("\n--- SCÈNE BLENDER GÉNÉRÉE ET ENREGISTRÉE ---")
     print(da.afficher_resultat())
     print(f"\n[Système] : État sauvegardé → {saved_path}")
-    print("[Système] : En attente de l'Agent 05 (Directeur Technique / Unreal)...")
+
+    # ── 11. L'ACTION DE L'AGENT 05 ────────────────────────────────────────────
+    module_05 = _charger_agent("05_directeur_technique.py")
+    DirecteurTechnique = module_05.DirecteurTechnique
+
+    print("\n[Système] : Génération du setup Unreal Engine par le Directeur Technique...")
+    dt = DirecteurTechnique()
+
+    try:
+        unreal = dt.creer_setup_unreal(
+            visual_style=state.get("visual_style"),
+            blender_script=state.get("blender_script"),
+            genre=state.get("genre"),
+            tone=state.get("tone"),
+        )
+    except RuntimeError as e:
+        print(f"\n❌ {e}")
+        print("\nConseils :")
+        print("  - Réessayez (les réponses LLM varient légèrement)")
+        print("  - Utilisez --model gpt-4o pour de meilleures réponses de code")
+        print("  - Vérifiez votre quota sur platform.openai.com/usage")
+        sys.exit(1)
+
+    # ── 12. SAUVEGARDE FINALE DANS LA MÉMOIRE ─────────────────────────────────
+    state.update("technical_notes", unreal["technical_notes"])
+    state.update("unreal_script",   unreal["unreal_script"])
+    saved_path = state.save()
+
+    print("\n--- SETUP UNREAL ENGINE GÉNÉRÉ ET ENREGISTRÉ ---")
+    print(dt.afficher_resultat())
+    print(f"\n[Système] : État sauvegardé → {saved_path}")
+
+    # ── 13. FIN DE LA PRODUCTION ───────────────────────────────────────────────
+    print("\n" + "=" * 45)
+    print("  🎬 PIPELINE COMPLET — PRODUCTION TERMINÉE")
+    print("=" * 45)
+    print(f"  État complet     : {saved_path}")
+    print(f"  Scripts générés  : agents/output/")
+    print("  Les 5 agents ont livré : vision, structure, scénario,")
+    print("  scène Blender et setup Unreal Engine.")
+    print("\n  ✅ Bonne production !\n")
 
 
 if __name__ == "__main__":

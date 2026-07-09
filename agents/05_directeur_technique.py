@@ -1,7 +1,7 @@
 """
-Agent 05 — Directeur Technique (Unreal Engine)
-Rôle : Générer un script Shell/Python pour automatiser Unreal Engine.
-Reçoit le style visuel Blender → produit les commandes Unreal Engine prêtes à l'emploi.
+05_directeur_technique.py — Agent 05 : Directeur Technique (Unreal Engine)
+Rôle : Générer un script Shell/Python pour automatiser Unreal Engine 5.
+Expose la classe DirecteurTechnique avec la méthode creer_setup_unreal().
 """
 
 import os
@@ -12,8 +12,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain.output_parsers import OutputFixingParser
 from langchain_core.exceptions import OutputParserException
-from langchain_core.tools import tool
-from shared_state import ProjectState, TechDirectorOutput
+from shared_state import TechDirectorOutput
 
 
 SYSTEM_PROMPT = """Tu es un Directeur Technique expert Unreal Engine 5 (UE5).
@@ -23,9 +22,9 @@ pour automatiser la création de scènes cinématographiques dans UE5.
 Règles absolues :
 - Les scripts Shell commencent par #!/bin/bash
 - Les commandes Python UE5 utilisent import unreal
-- Inclure des commentaires détaillés à chaque étape
-- Les scripts doivent être autonomes et documentés
-- Prévoir des chemins relatifs pour la portabilité
+- Commente chaque étape en détail
+- Le script doit être autonome et documenté
+- Utilise des chemins relatifs pour la portabilité
 
 Tu dois répondre UNIQUEMENT avec le JSON demandé — aucun texte avant ou après.
 """
@@ -38,145 +37,155 @@ Aperçu du script Blender de référence :
 Genre : {genre} | Ton : {tone}
 
 Génère exactement :
-- technical_notes : étapes techniques du workflow Blender→Unreal, assets, contraintes (3-5 lignes)
-- unreal_script : script Shell (.sh) complet avec les commandes UE5 pour importer et configurer la scène
-  (doit inclure : import FBX, Sequencer, éclairage Lumen, export final)
+- technical_notes : étapes du workflow Blender → Unreal, assets nécessaires, contraintes (3-5 lignes)
+- unreal_script : script Shell complet avec les commandes UE5
+  (doit inclure : import FBX, configuration Sequencer, éclairage Lumen, export final en vidéo)
 - filename : nom du fichier à créer (ex: setup_scene_01.sh)
 
 {format_instructions}"""
 
 
-def _sanitize_filename(filename: str, allowed_ext: tuple = (".sh", ".py")) -> str:
+def _securiser_nom_fichier(filename: str) -> str:
     """
-    Nettoie un nom de fichier généré par le LLM pour éviter les traversals de répertoire.
-
-    - Prend uniquement le basename (supprime les chemins relatifs ../../../)
-    - Supprime les caractères dangereux
-    - Garantit une extension autorisée
-
-    Args:
-        filename: Nom de fichier brut venant du LLM
-        allowed_ext: Extensions autorisées
-
-    Returns:
-        Nom de fichier sûr et valide
+    Nettoie un nom de fichier généré par le LLM.
+    Bloque les traversals de répertoire (../) et les caractères dangereux.
+    Force une extension .sh ou .py.
     """
     safe = os.path.basename(filename)
     safe = re.sub(r"[^\w\-.]", "_", safe)
-    _, ext = os.path.splitext(safe)
-    if ext not in allowed_ext:
-        safe = safe + allowed_ext[0]
-    if len(safe) > 80:
-        safe = safe[:76] + allowed_ext[0]
-    return safe
+    name, ext = os.path.splitext(safe)
+    if ext not in (".sh", ".py"):
+        safe = name + ".sh"
+    return safe[:80] if len(safe) > 80 else safe
 
 
-@tool
-def save_unreal_script(filename: str, code: str) -> str:
+class DirecteurTechnique:
     """
-    Outil LangChain : Sauvegarde un script Unreal dans le dossier output/.
+    Agent 05 — Directeur Technique (Unreal Engine).
 
-    Args:
-        filename: Nom du fichier .sh ou .py à créer
-        code: Contenu du script Shell/Python Unreal
+    Dernier maillon de la chaîne : lit le style visuel et le script Blender
+    de l'Agent 04, produit un script Shell UE5 et le sauvegarde dans output/.
 
-    Returns:
-        Chemin complet du fichier créé
+    Usage :
+        dt = DirecteurTechnique()
+        resultat = dt.creer_setup_unreal(
+            visual_style="Ambiance bioluminescente...",
+            blender_script="import bpy\\n...",
+            genre="Science-fiction contemplative",
+            tone="Sombre, poétique"
+        )
+        # resultat["technical_notes"], resultat["unreal_script"], resultat["saved_path"]
     """
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-    os.makedirs(output_dir, exist_ok=True)
 
-    safe_filename = _sanitize_filename(filename, allowed_ext=(".sh", ".py"))
-    filepath = os.path.join(output_dir, safe_filename)
+    def __init__(self, model: str = "gpt-4o", temperature: float = 0.3):
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("\n⚠️  OPENAI_API_KEY manquante.")
+            print("   Copiez .env.example en .env et ajoutez votre clé OpenAI.")
+            sys.exit(1)
 
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(code)
+        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
 
-    # Rendre exécutable sur Linux/Mac
-    try:
-        os.chmod(filepath, 0o755)
-    except Exception:
-        pass
+        base_parser = PydanticOutputParser(pydantic_object=TechDirectorOutput)
+        self.parser = OutputFixingParser.from_llm(parser=base_parser, llm=self.llm)
+        self.base_parser = base_parser
 
-    return f"Script Unreal sauvegardé : {filepath}"
+        self.prompt = ChatPromptTemplate.from_messages([
+            ("system", SYSTEM_PROMPT),
+            ("human", USER_PROMPT),
+        ]).partial(format_instructions=base_parser.get_format_instructions())
 
+    def creer_setup_unreal(
+        self,
+        visual_style: str,
+        blender_script: str,
+        genre: str,
+        tone: str,
+    ) -> dict:
+        """
+        Génère et sauvegarde le script Shell Unreal Engine.
 
-def _check_api_key() -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("\n⚠️  OPENAI_API_KEY manquante. Copiez .env.example en .env et ajoutez votre clé.")
-        sys.exit(1)
-    return api_key
+        Args:
+            visual_style   : Style visuel décrit par l'Agent 04
+            blender_script : Script Blender complet de l'Agent 04 (référence de cohérence)
+            genre          : Genre du film (sortie Agent 01)
+            tone           : Ton du film (sortie Agent 01)
 
+        Returns:
+            {
+              "technical_notes": str,  # notes de production
+              "unreal_script"  : str,  # script Shell complet
+              "saved_path"     : str,  # chemin du fichier .sh sauvegardé
+            }
 
-def invoke(state: ProjectState, llm: ChatOpenAI) -> ProjectState:
-    """
-    Invoque l'Agent 05 et sauvegarde le script Unreal généré.
+        Raises:
+            RuntimeError : Si le LLM échoue à produire une réponse valide
+        """
+        chain = self.prompt | self.llm | self.parser
 
-    Args:
-        state: L'état contenant le style visuel et le script Blender
-        llm: Le modèle LLM partagé
+        # On tronque le script Blender pour ne pas saturer le contexte du prompt
+        preview = blender_script[:800] + "..." if len(blender_script) > 800 else blender_script
 
-    Returns:
-        L'état final enrichi avec le script Unreal et les notes techniques
+        try:
+            response: TechDirectorOutput = chain.invoke({
+                "visual_style":           visual_style,
+                "blender_script_preview": preview,
+                "genre":                  genre,
+                "tone":                   tone,
+            })
+        except (OutputParserException, Exception) as e:
+            raise RuntimeError(f"[Agent 05] Échec de la génération Unreal : {e}") from e
 
-    Raises:
-        RuntimeError: Si le parsing échoue après tentative de correction
-    """
-    base_parser = PydanticOutputParser(pydantic_object=TechDirectorOutput)
-    parser = OutputFixingParser.from_llm(parser=base_parser, llm=llm)
+        saved_path = self._sauvegarder(response.filename, response.unreal_script)
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
-        ("human", USER_PROMPT),
-    ]).partial(format_instructions=base_parser.get_format_instructions())
+        self._last_technical_notes = response.technical_notes
+        self._last_unreal_script   = response.unreal_script
+        self._last_saved_path      = saved_path
 
-    chain = prompt | llm | parser
+        return {
+            "technical_notes": response.technical_notes,
+            "unreal_script":   response.unreal_script,
+            "saved_path":      saved_path,
+        }
 
-    print("\n[Agent 05 - Directeur Technique] Génération du script Unreal Engine...")
-    try:
-        response: TechDirectorOutput = chain.invoke({
-            "visual_style": state.visual_style,
-            "blender_script_preview": (
-                state.blender_script[:800] + "..."
-                if len(state.blender_script) > 800
-                else state.blender_script
-            ),
-            "genre": state.genre,
-            "tone": state.tone,
-        })
-    except (OutputParserException, Exception) as e:
-        raise RuntimeError(f"[Agent 05] Échec du parsing : {e}") from e
+    def _sauvegarder(self, filename: str, code: str) -> str:
+        """Sauvegarde le script Unreal dans agents/output/ de façon sécurisée."""
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+        os.makedirs(output_dir, exist_ok=True)
 
-    # Propagation directe depuis le schéma structuré
-    state.technical_notes = response.technical_notes
-    state.unreal_script = response.unreal_script
+        safe_filename = _securiser_nom_fichier(filename)
+        filepath = os.path.join(output_dir, safe_filename)
 
-    # Sauvegarde sécurisée via l'outil LangChain
-    result = save_unreal_script.invoke({
-        "filename": response.filename,
-        "code": response.unreal_script,
-    })
-    print(f"[Agent 05 ✓] {result}")
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(code)
 
-    return state
+        # Rend le script exécutable sur Linux/Mac
+        try:
+            os.chmod(filepath, 0o755)
+        except Exception:
+            pass
+
+        return filepath
+
+    def afficher_resultat(self) -> str:
+        """Retourne un résumé formaté du dernier appel à creer_setup_unreal()."""
+        return (
+            f"NOTES TECHNIQUES :\n{getattr(self, '_last_technical_notes', '—')}\n\n"
+            f"SCRIPT UNREAL sauvegardé → {getattr(self, '_last_saved_path', '—')}\n"
+            f"(Aperçu — 10 premières lignes) :\n"
+            + "\n".join(getattr(self, "_last_unreal_script", "").splitlines()[:10])
+        )
 
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
 
-    llm = ChatOpenAI(
-        model="gpt-4o",
-        temperature=0.3,
-        api_key=_check_api_key(),
-    )
-    test_state = ProjectState(
-        visual_style="Ambiance bioluminescente sous-marine, éclairage bleu profond avec particules lumineuses.",
-        blender_script="import bpy\n# Script de test\nbpy.ops.object.select_all(action='SELECT')\nbpy.ops.object.delete()",
+    dt = DirecteurTechnique()
+    dt.creer_setup_unreal(
+        visual_style="Ambiance bioluminescente sous-marine, éclairage bleu profond, particules lumineuses.",
+        blender_script="import bpy\nbpy.ops.object.select_all(action='SELECT')\nbpy.ops.object.delete()",
         genre="Science-fiction contemplative",
         tone="Sombre, poétique",
     )
-    result = invoke(test_state, llm)
-    print(f"\nNotes Techniques:\n{result.technical_notes}")
-    print(f"\nScript Unreal (début):\n{result.unreal_script[:200]}")
+    print(dt.afficher_resultat())

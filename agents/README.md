@@ -74,13 +74,19 @@ python main.py --model gpt-4o --idea "Un moine shaolin découvre que son temple 
 
 | Fichier | Rôle |
 |---------|------|
-| `shared_state.py` | Schéma Pydantic — état partagé entre agents |
-| `01_directeur.py` | Agent 01 — Vision artistique globale |
-| `02_architecte_narratif.py` | Agent 02 — Structure dramaturgique |
-| `03_scenariste.py` | Agent 03 — Scénario et personnages |
-| `04_directeur_artistique.py` | Agent 04 — Script Python Blender |
-| `05_directeur_technique.py` | Agent 05 — Script Shell Unreal Engine |
-| `main.py` | Orchestrateur — lie tous les agents en chaîne |
+| `shared_state.py` | `WorldState` (mémoire commune) + schémas Pydantic par agent |
+| `01_directeur_creatif.py` | Agent 01 — classe `DirecteurCreatif` : vision, genre, ton |
+| `02_architecte_narratif.py` | Agent 02 — classe `ArchitecteNarratif` : synopsis, actes, scènes clés |
+| `03_scenariste.py` | Agent 03 — classe `Scenariste` : fiches personnages, extrait scénario |
+| `04_directeur_artistique.py` | Agent 04 — classe `DirecteurArtistique` : script Python Blender |
+| `05_directeur_technique.py` | Agent 05 — classe `DirecteurTechnique` : script Shell Unreal Engine |
+| `main.py` | Orchestrateur — `lancer_studio()` lie les 5 agents via `WorldState` |
+
+Chaque agent expose une classe avec une méthode métier dédiée (`generer_vision()`,
+`construire_structure()`, `ecrire_scenario()`, `creer_scene_blender()`,
+`creer_setup_unreal()`). Les fichiers commencent par un chiffre pour l'ordre de
+lecture ; `main.py` les charge via `importlib.util` car Python n'autorise pas
+`import 01_...` directement.
 
 ## Tester un agent seul
 
@@ -88,7 +94,7 @@ Chaque agent peut être lancé indépendamment pour tester :
 
 ```bash
 cd agents/
-python 01_directeur.py
+python 01_directeur_creatif.py
 python 04_directeur_artistique.py
 ```
 
