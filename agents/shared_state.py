@@ -40,6 +40,12 @@ class WorldState:
             "blender_script": "",
             "technical_notes": "",
             "unreal_script": "",
+            "coherence_score": "",
+            "issues": "",
+            "needs_gimp_retouching": "",
+            "gimp_script": "",
+            "needs_video_editing": "",
+            "video_editing_notes": "",
             "last_updated": "",
         }
 
@@ -132,3 +138,20 @@ class TechDirectorOutput(BaseModel):
     technical_notes: str = Field(description="Notes de production : workflow Blender→Unreal, assets, contraintes")
     unreal_script: str = Field(description="Script Shell ou Python Unreal Engine complet et fonctionnel")
     filename: str = Field(description="Nom du fichier à créer (ex: setup_scene_01.sh)")
+
+
+class PostProductionOutput(BaseModel):
+    """Sortie structurée de l'Agent 06 — Superviseur Post-Production.
+
+    Cet agent évalue la cohérence du résultat produit par les Agents 04/05
+    et décide, au cas par cas, si des outils correctifs sont nécessaires.
+    Aucun outil n'est déclenché si le résultat est déjà conforme.
+    """
+    coherence_score: int = Field(description="Score de cohérence du résultat, de 0 à 100")
+    issues: str = Field(description="Problèmes de cohérence identifiés, ou 'Aucun' si le résultat est conforme")
+
+    needs_gimp_retouching: bool = Field(description="True si une retouche image (GIMP) est nécessaire pour corriger un problème visuel")
+    gimp_script: str = Field(description="Script Script-Fu/Python-Fu GIMP pour la retouche, vide si non nécessaire")
+
+    needs_video_editing: bool = Field(description="True si un montage (Kdenlive/Shotcut) est nécessaire pour assembler/corriger le rendu final")
+    video_editing_notes: str = Field(description="Instructions de montage (coupes, transitions, assemblage), vide si non nécessaire")

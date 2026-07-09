@@ -8,16 +8,21 @@ Architecture :
   [Agent 01 : DirecteurCreatif]   → vision_globale, genre, ton
        │
        ▼
-  [Agent 02 : ArchitecteNarratif] → synopsis, actes, scènes clés   (à venir)
+  [Agent 02 : ArchitecteNarratif] → synopsis, actes, scènes clés
        │
        ▼
-  [Agent 03 : Scenariste]         → dialogues, personnages          (à venir)
+  [Agent 03 : Scenariste]         → dialogues, personnages
        │
        ▼
-  [Agent 04 : DirecteurArtistique]→ script Blender (.py)            (à venir)
+  [Agent 04 : DirecteurArtistique]→ script Blender (.py)
        │
        ▼
-  [Agent 05 : DirecteurTechnique] → script Unreal (.sh)             (à venir)
+  [Agent 05 : DirecteurTechnique] → script Unreal (.sh)
+       │
+       ▼
+  [Agent 06 : SuperviseurPostProduction] → audit de conformité,
+                                            déclenche GIMP/Kdenlive
+                                            SEULEMENT si nécessaire
 
 Usage :
     cd agents/
@@ -222,21 +227,71 @@ def lancer_studio():
     print(dt.afficher_resultat())
     print(f"\n[Système] : État sauvegardé → {saved_path}")
 
-    # ── 13. FIN DE LA PRODUCTION ───────────────────────────────────────────────
+    # ── 13. L'ACTION DE L'AGENT 06 (audit conditionnel, entièrement optionnel) ─
+    module_06 = _charger_agent("06_superviseur_post_production.py")
+    SuperviseurPostProduction = module_06.SuperviseurPostProduction
+
+    print("\n[Système] : Audit de conformité par le Superviseur Post-Production...")
+    audit = None
+    try:
+        superviseur = SuperviseurPostProduction()
+        audit = superviseur.analyser_conformite(
+            visual_style=state.get("visual_style"),
+            technical_notes=state.get("technical_notes"),
+            blender_script=state.get("blender_script"),
+            unreal_script=state.get("unreal_script"),
+            genre=state.get("genre"),
+            tone=state.get("tone"),
+        )
+    except RuntimeError as e:
+        print(f"\n⚠️  {e}")
+        print("   L'audit de conformité a échoué — le pipeline continue sans lui.")
+
+    if audit is not None:
+        state.update("coherence_score", audit["coherence_score"])
+        state.update("issues", audit["issues"])
+        state.update("needs_gimp_retouching", audit["needs_gimp_retouching"])
+        state.update("gimp_script", audit["gimp_script"])
+        state.update("needs_video_editing", audit["needs_video_editing"])
+        state.update("video_editing_notes", audit["video_editing_notes"])
+        saved_path = state.save()
+
+        print("\n--- AUDIT DE CONFORMITÉ ---")
+        print(superviseur.afficher_rapport())
+        print(f"\n[Système] : État sauvegardé → {saved_path}")
+
+    # ── 14. FIN DE LA PRODUCTION ───────────────────────────────────────────────
     print("\n" + "=" * 45)
     print("  🎬 PIPELINE COMPLET — PRODUCTION TERMINÉE")
     print("=" * 45)
     print(f"  État complet     : {saved_path}")
     print(f"  Scripts générés  : agents/output/")
-    print("  Les 5 agents ont livré : vision, structure, scénario,")
+    print("  Les 5 agents créatifs ont livré : vision, structure, scénario,")
     print("  scène Blender et setup Unreal Engine.")
+    print("  Le Superviseur a déclenché uniquement les outils nécessaires.")
     print("\n  ✅ Bonne production !")
 
-    # ── 14. COMMANDES HEADLESS PRÊTES À L'EMPLOI ─────────────────────────────
+    # ── 15. COMMANDES HEADLESS PRÊTES À L'EMPLOI ─────────────────────────────
     module_headless = _charger_agent("utils_headless.py")
+
+    gimp_path = ""
+    montage_notes_path = ""
+    if audit is not None and audit["needs_gimp_retouching"]:
+        gimp_path = audit["gimp_saved_path"]
+    if audit is not None and audit["needs_video_editing"]:
+        # Les notes de montage sont écrites dans un fichier pour être consultées
+        # avant l'ouverture de Kdenlive/Shotcut (pas de vrai mode headless).
+        montage_notes_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "output", "notes_montage.txt"
+        )
+        with open(montage_notes_path, "w", encoding="utf-8") as f:
+            f.write(audit["video_editing_notes"])
+
     module_headless.afficher_commandes_headless(
         blender_path=blender["saved_path"],
         unreal_path=unreal["saved_path"],
+        gimp_path=gimp_path,
+        montage_notes_path=montage_notes_path,
     )
     print()
 

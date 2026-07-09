@@ -80,13 +80,33 @@ python main.py --model gpt-4o --idea "Un moine shaolin découvre que son temple 
 | `03_scenariste.py` | Agent 03 — classe `Scenariste` : fiches personnages, extrait scénario |
 | `04_directeur_artistique.py` | Agent 04 — classe `DirecteurArtistique` : script Python Blender |
 | `05_directeur_technique.py` | Agent 05 — classe `DirecteurTechnique` : script Shell Unreal Engine |
-| `main.py` | Orchestrateur — `lancer_studio()` lie les 5 agents via `WorldState` |
+| `06_superviseur_post_production.py` | Agent 06 — classe `SuperviseurPostProduction` : audit de conformité, déclenche GIMP/montage **seulement si nécessaire** |
+| `utils_headless.py` | Génère les commandes headless (Blender, Unreal, GIMP, montage) prêtes à copier-coller |
+| `main.py` | Orchestrateur — `lancer_studio()` lie les 6 agents via `WorldState` |
 
 Chaque agent expose une classe avec une méthode métier dédiée (`generer_vision()`,
 `construire_structure()`, `ecrire_scenario()`, `creer_scene_blender()`,
-`creer_setup_unreal()`). Les fichiers commencent par un chiffre pour l'ordre de
-lecture ; `main.py` les charge via `importlib.util` car Python n'autorise pas
-`import 01_...` directement.
+`creer_setup_unreal()`, `analyser_conformite()`). Les fichiers commencent par un
+chiffre pour l'ordre de lecture ; `main.py` les charge via `importlib.util` car
+Python n'autorise pas `import 01_...` directement.
+
+### Agent 06 — Superviseur Post-Production (conditionnel)
+
+Ce dernier agent n'exécute jamais un outil "juste au cas où". Il audite le
+résultat des Agents 04/05 et ne déclenche que ce qui est réellement
+nécessaire :
+
+- **GIMP** (retouche image) — uniquement si un écart visuel doit être corrigé.
+  Un script Python-Fu est sauvegardé dans `output/retouche_gimp.py`.
+- **Kdenlive / Shotcut** (montage) — uniquement si un assemblage est requis
+  pour rendre le rendu final conforme. Les instructions sont sauvegardées
+  dans `output/notes_montage.txt` (ces logiciels n'ont pas de vrai mode
+  headless : ils reposent sur le moteur MLT, d'où l'usage de `melt` pour un
+  rendu automatisé une fois le projet construit).
+
+Si le résultat est déjà cohérent, aucun outil n'est proposé — seuls
+Blender et Unreal Engine (déjà générés par les Agents 04/05) apparaissent
+dans le récapitulatif final.
 
 ## Tester un agent seul
 
