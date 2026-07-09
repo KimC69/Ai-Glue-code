@@ -1,7 +1,7 @@
 """
-Agent 02 — Architecte Narratif
-Rôle : Construire la structure dramaturgique complète.
-Reçoit la vision du Directeur → produit synopsis, actes et scènes clés structurés.
+02_architecte_narratif.py — Agent 02 : Architecte Narratif
+Rôle : Construire la structure dramaturgique complète à partir de la vision du Directeur.
+Expose la classe ArchitecteNarratif avec la méthode construire_structure().
 """
 
 import os
@@ -11,7 +11,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain.output_parsers import OutputFixingParser
 from langchain_core.exceptions import OutputParserException
-from shared_state import ProjectState, NarrativeOutput
+from shared_state import NarrativeOutput
 
 
 SYSTEM_PROMPT = """Tu es un Architecte Narratif expert en dramaturgie cinématographique.
@@ -21,87 +21,124 @@ Tu construis des histoires émotionnellement résonnantes et dramaturgiquement s
 Tu dois répondre UNIQUEMENT avec le JSON demandé — aucun texte avant ou après.
 """
 
-USER_PROMPT = """Vision du Directeur :
-{director_vision}
+USER_PROMPT = """Vision du Directeur Créatif :
+{vision_globale}
 
 Genre : {genre}
 Ton : {tone}
 
 Construis la structure narrative. Fournis exactement :
-- synopsis : résumé de 100 à 150 mots
+- synopsis : résumé de l'histoire en 100 à 150 mots
 - acts : structure en 3 actes avec les tournants clés (setup / confrontation / résolution)
 - key_scenes : 3 scènes clés détaillées (ouverture, climax, résolution)
 
 {format_instructions}"""
 
 
-def _check_api_key() -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("\n⚠️  OPENAI_API_KEY manquante. Copiez .env.example en .env et ajoutez votre clé.")
-        sys.exit(1)
-    return api_key
-
-
-def invoke(state: ProjectState, llm: ChatOpenAI) -> ProjectState:
+class ArchitecteNarratif:
     """
-    Invoque l'Agent 02 avec la sortie structurée de l'Agent 01.
+    Agent 02 — Architecte Narratif.
 
-    Args:
-        state: L'état contenant genre, ton et vision du directeur
-        llm: Le modèle LLM partagé
+    Lit la vision du Directeur dans WorldState, construit la structure
+    dramaturgique, et renvoie les résultats pour les sauvegarder.
 
-    Returns:
-        L'état enrichi avec synopsis, actes et scènes clés
-    
-    Raises:
-        RuntimeError: Si le parsing échoue après tentative de correction
+    Usage :
+        architecte = ArchitecteNarratif()
+        resultat = architecte.construire_structure(
+            vision_globale="...",
+            genre="Science-fiction contemplative",
+            tone="Sombre, poétique"
+        )
+        # resultat["synopsis"], resultat["acts"], resultat["key_scenes"]
     """
-    base_parser = PydanticOutputParser(pydantic_object=NarrativeOutput)
-    parser = OutputFixingParser.from_llm(parser=base_parser, llm=llm)
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
-        ("human", USER_PROMPT),
-    ]).partial(format_instructions=base_parser.get_format_instructions())
+    def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.7):
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("\n⚠️  OPENAI_API_KEY manquante.")
+            print("   Copiez .env.example en .env et ajoutez votre clé OpenAI.")
+            sys.exit(1)
 
-    chain = prompt | llm | parser
+        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
 
-    print("\n[Agent 02 - Architecte Narratif] Structuration de l'histoire...")
-    try:
-        response: NarrativeOutput = chain.invoke({
-            "director_vision": state.director_vision,
-            "genre": state.genre,
-            "tone": state.tone,
-        })
-    except (OutputParserException, Exception) as e:
-        raise RuntimeError(f"[Agent 02] Échec du parsing : {e}") from e
+        base_parser = PydanticOutputParser(pydantic_object=NarrativeOutput)
+        # OutputFixingParser : si le JSON est malformé, le LLM se corrige seul
+        self.parser = OutputFixingParser.from_llm(parser=base_parser, llm=self.llm)
+        self.base_parser = base_parser
 
-    # Propagation directe depuis le schéma structuré
-    state.synopsis = response.synopsis
-    state.acts = response.acts
-    state.key_scenes = response.key_scenes
+        self.prompt = ChatPromptTemplate.from_messages([
+            ("system", SYSTEM_PROMPT),
+            ("human", USER_PROMPT),
+        ]).partial(format_instructions=base_parser.get_format_instructions())
 
-    print(f"[Agent 02 ✓] Structure narrative construite.")
-    return state
+    def construire_structure(
+        self,
+        vision_globale: str,
+        genre: str,
+        tone: str,
+    ) -> dict:
+        """
+        Génère la structure narrative complète à partir de la vision du Directeur.
+
+        Args:
+            vision_globale : Texte complet de la vision du Directeur Créatif
+            genre          : Genre cinématographique (ex: "Science-fiction contemplative")
+            tone           : Ton du film (ex: "Sombre, poétique")
+
+        Returns:
+            Dictionnaire avec les clés :
+                - synopsis   : résumé de l'histoire (100-150 mots)
+                - acts       : structure en 3 actes
+                - key_scenes : 3 scènes clés détaillées
+
+        Raises:
+            RuntimeError : Si le LLM échoue à produire une réponse valide
+        """
+        chain = self.prompt | self.llm | self.parser
+
+        try:
+            response: NarrativeOutput = chain.invoke({
+                "vision_globale": vision_globale,
+                "genre": genre,
+                "tone": tone,
+            })
+        except (OutputParserException, Exception) as e:
+            raise RuntimeError(f"[Agent 02] Échec de la construction narrative : {e}") from e
+
+        # Formatage lisible pour affichage terminal
+        self._last_synopsis = response.synopsis
+        self._last_acts = response.acts
+        self._last_key_scenes = response.key_scenes
+
+        return {
+            "synopsis": response.synopsis,
+            "acts": response.acts,
+            "key_scenes": response.key_scenes,
+        }
+
+    def afficher_structure(self) -> str:
+        """Retourne un résumé formaté du dernier appel à construire_structure()."""
+        return (
+            f"SYNOPSIS :\n{getattr(self, '_last_synopsis', '—')}\n\n"
+            f"ACTES :\n{getattr(self, '_last_acts', '—')}\n\n"
+            f"SCÈNES CLÉS :\n{getattr(self, '_last_key_scenes', '—')}"
+        )
 
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()
 
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.7,
-        api_key=_check_api_key(),
-    )
-    test_state = ProjectState(
-        idea="Un astronaute découvre une civilisation sous-marine sur une lune de Jupiter",
-        director_vision="Film de science-fiction contemplatif, inspiré de Premier Contact et Annihilation.",
+    architecte = ArchitecteNarratif()
+    resultat = architecte.construire_structure(
+        vision_globale=(
+            "GENRE   : Science-fiction contemplative\n"
+            "TON     : Sombre, poétique, métaphysique\n"
+            "VISION  : Un film sur la solitude du contact avec l'inconnu. "
+            "Inspiré de Premier Contact et Annihilation."
+        ),
         genre="Science-fiction contemplative",
         tone="Sombre, poétique, métaphysique",
     )
-    result = invoke(test_state, llm)
-    print(f"\nSynopsis:\n{result.synopsis}")
-    print(f"\nActes:\n{result.acts}")
-    print(f"\nScènes clés:\n{result.key_scenes}")
+    print("\n--- Structure Narrative ---")
+    print(architecte.afficher_structure())

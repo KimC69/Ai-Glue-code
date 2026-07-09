@@ -100,7 +100,37 @@ def lancer_studio():
     print("\n--- VISION VALIDÉE ET ENREGISTRÉE ---")
     print(vision)
     print(f"\n[Système] : État sauvegardé → {saved_path}")
-    print("[Système] : En attente de l'Agent 02 (Architecte Narratif)...")
+
+    # ── 5. L'ACTION DE L'AGENT 02 ─────────────────────────────────────────────
+    module_02 = _charger_agent("02_architecte_narratif.py")
+    ArchitecteNarratif = module_02.ArchitecteNarratif
+
+    print("\n[Système] : Construction de la structure narrative par l'Architecte...")
+    architecte = ArchitecteNarratif()
+
+    try:
+        structure = architecte.construire_structure(
+            vision_globale=state.get("vision_globale"),
+            genre=state.get("genre"),
+            tone=state.get("tone"),
+        )
+    except RuntimeError as e:
+        print(f"\n❌ {e}")
+        print("\nConseils :")
+        print("  - Réessayez (les réponses LLM varient légèrement)")
+        print("  - Vérifiez votre quota sur platform.openai.com/usage")
+        sys.exit(1)
+
+    # ── 6. SAUVEGARDE DANS LA MÉMOIRE ─────────────────────────────────────────
+    state.update("synopsis",   structure["synopsis"])
+    state.update("acts",       structure["acts"])
+    state.update("key_scenes", structure["key_scenes"])
+    saved_path = state.save()
+
+    print("\n--- STRUCTURE NARRATIVE VALIDÉE ET ENREGISTRÉE ---")
+    print(architecte.afficher_structure())
+    print(f"\n[Système] : État sauvegardé → {saved_path}")
+    print("[Système] : En attente de l'Agent 03 (Scénariste)...")
 
 
 if __name__ == "__main__":
