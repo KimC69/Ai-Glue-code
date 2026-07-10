@@ -1,6 +1,6 @@
 # Système Multi-Agents Cinématographique — LangChain
 
-Un pipeline de production de films automatisé avec 5 agents IA spécialisés.
+Un pipeline de production de films automatisé avec 7 agents IA spécialisés.
 
 ## Architecture
 
@@ -23,11 +23,21 @@ Votre idée
 [Agent 05 - Dir. Technique]     → Script Shell pour Unreal Engine (.sh) ← sauvegardé dans output/
     │
     ▼
+  [Agent 06 - Superviseur Post-Prod] → Audit de conformité, outils conditionnels
+    │
+    ▼
+  [Agent 07 - Exporteur Multi-Format] → Script FFmpeg multi-format (.sh) ← sauvegardé dans output/
+    │
+    ▼
   output/
     ├── rapport_production_YYYYMMDD_HHMMSS.md
     ├── state_YYYYMMDD_HHMMSS.json
-    ├── scene_01_opening.py   (script Blender)
-    └── setup_scene_01.sh     (script Unreal)
+    ├── scene_01_opening.py       (script Blender)
+    ├── setup_scene_01.sh         (script Unreal)
+    ├── retouche_gimp.py          (script GIMP, si nécessaire)
+    ├── concept_krita.py          (script Krita, si nécessaire)
+    ├── export_multi_format.sh    (script FFmpeg)
+    └── notes_*.txt               (instructions optionnelles)
 ```
 
 ## Installation
@@ -81,14 +91,16 @@ python main.py --model gpt-4o --idea "Un moine shaolin découvre que son temple 
 | `04_directeur_artistique.py` | Agent 04 — classe `DirecteurArtistique` : script Python Blender |
 | `05_directeur_technique.py` | Agent 05 — classe `DirecteurTechnique` : script Shell Unreal Engine |
 | `06_superviseur_post_production.py` | Agent 06 — classe `SuperviseurPostProduction` : audit de conformité, déclenche GIMP/montage **seulement si nécessaire** |
-| `utils_headless.py` | Génère les commandes headless (Blender, Unreal, GIMP, montage) prêtes à copier-coller |
-| `main.py` | Orchestrateur — `lancer_studio()` lie les 6 agents via `WorldState` |
+| `07_exporteur_multi_format.py` | Agent 07 — classe `ExporteurMultiFormat` : déclinaison multi-format (TV, téléphone, réseaux sociaux) via FFmpeg |
+| `utils_headless.py` | Génère les commandes headless (Blender, Unreal, GIMP, montage, export FFmpeg) prêtes à copier-coller |
+| `main.py` | Orchestrateur — `lancer_studio()` lie les 7 agents via `WorldState` |
 
 Chaque agent expose une classe avec une méthode métier dédiée (`generer_vision()`,
 `construire_structure()`, `ecrire_scenario()`, `creer_scene_blender()`,
-`creer_setup_unreal()`, `analyser_conformite()`). Les fichiers commencent par un
-chiffre pour l'ordre de lecture ; `main.py` les charge via `importlib.util` car
-Python n'autorise pas `import 01_...` directement.
+`creer_setup_unreal()`, `analyser_conformite()`, `generer_exports()`). Les
+fichiers commencent par un chiffre pour l'ordre de lecture ; `main.py` les
+charge via `importlib.util` car Python n'autorise pas `import 01_...`
+directement.
 
 ### Agent 06 — Superviseur Post-Production (conditionnel)
 
@@ -115,6 +127,15 @@ Si le résultat est déjà cohérent, aucun outil n'est proposé — seuls
 Blender et Unreal Engine (déjà générés par les Agents 04/05) apparaissent
 dans le récapitulatif final. La majorité des projets n'auront besoin que
 d'un sous-ensemble de ces outils, voire d'aucun.
+
+### Agent 07 — Exporteur Multi-Format (conditionnel)
+
+Cet agent détermine les formats de diffusion pertinents pour le projet et
+génère un script FFmpeg unique qui décline la vidéo master en plusieurs
+formats : 16:9 (TV/YouTube), 9:16 (TikTok/Reels/Shorts), 1:1 (Instagram
+feed), 4:5 (Instagram vertical) ou 21:9 (cinémascope). Le script est
+sauvegardé dans `output/export_multi_format.sh` et est prêt à être exécuté
+une fois le master vidéo disponible.
 
 ## Tester un agent seul
 

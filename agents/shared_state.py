@@ -6,7 +6,7 @@ WorldState est la mémoire commune : chaque agent peut y lire et écrire.
 import json
 import os
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Any
 
 
@@ -54,6 +54,8 @@ class WorldState:
             "krita_script": "",
             "needs_obs": "",
             "obs_notes": "",
+            "export_formats": "",
+            "ffmpeg_script": "",
             "last_updated": "",
         }
 
@@ -175,3 +177,30 @@ class PostProductionOutput(BaseModel):
 
     needs_obs: bool = Field(description="True si une capture/streaming est nécessaire (ex: capture du rendu Unreal en temps réel)")
     obs_notes: str = Field(description="Instructions de configuration OBS (scène, sources, sortie), vide si non nécessaire")
+
+
+class ExportMultiFormatOutput(BaseModel):
+    """Sortie structurée de l'Agent 07 — Exporteur Multi-Format.
+
+    Cet agent détermine les formats de diffusion pertinents pour le projet
+    (TV, téléphone, réseaux sociaux) et génère un script FFmpeg unique qui
+    décline la vidéo master dans chaque format.
+    """
+    formats: list[str] = Field(description="Liste des formats choisis (ex: ['16:9', '9:16', '1:1']), au moins un format requis")
+    ffmpeg_script: str = Field(description="Script shell FFmpeg complet et exécutable, commençant par #!/bin/bash")
+
+    @field_validator("formats", mode="after")
+    @classmethod
+    def _formats_non_vides(cls, v: list[str]) -> list[str]:
+        if not v or all(not f.strip() for f in v):
+            raise ValueError("Au moins un format d'export doit être choisi.")
+        return [f.strip() for f in v if f.strip()]
+
+    @field_validator("ffmpeg_script", mode="after")
+    @classmethod
+    def _script_exécutable(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Le script FFmpeg ne peut pas être vide.")
+        if "#!/bin/bash" not in v:
+            raise ValueError("Le script FFmpeg doit commencer par #!/bin/bash.")
+        return v

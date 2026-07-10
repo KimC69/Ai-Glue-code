@@ -123,6 +123,20 @@ def commande_obs_headless(notes_path: str) -> str:
     )
 
 
+def commande_export_multi_format(script_path: str) -> str:
+    """
+    Construit la commande pour exécuter le script FFmpeg d'export multi-format.
+
+    Args:
+        script_path : Chemin vers le script shell généré par l'Agent 07
+
+    Returns:
+        La commande shell prête à copier-coller
+    """
+    rel_path = os.path.relpath(script_path)
+    return f"bash {rel_path}"
+
+
 def commande_montage_headless(notes_path: str) -> str:
     """
     Le montage (Kdenlive/Shotcut) n'a pas de vrai mode headless : les deux
@@ -160,6 +174,7 @@ def afficher_commandes_headless(
     darktable_notes_path: str = "",
     krita_path: str = "",
     obs_notes_path: str = "",
+    export_script_path: str = "",
 ) -> None:
     """
     Affiche un bloc récapitulatif avec les commandes headless à copier-coller.
@@ -217,6 +232,11 @@ def afficher_commandes_headless(
         print("\n  OBS Studio (capture/streaming jugée nécessaire) :")
         print(f"    {commande_obs_headless(obs_notes_path)}")
         _verifier_outil("obs", "OBS Studio")
+
+    if export_script_path:
+        print("\n  Export multi-format (déclinaisons TV/téléphone/réseaux sociaux) :")
+        print(f"    {commande_export_multi_format(export_script_path)}")
+        _verifier_outil("ffmpeg", "FFmpeg")
 
     print("\n" + "─" * 60)
 

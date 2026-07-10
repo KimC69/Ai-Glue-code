@@ -23,6 +23,9 @@ Architecture :
   [Agent 06 : SuperviseurPostProduction] → audit de conformité,
                                             déclenche GIMP/Kdenlive
                                             SEULEMENT si nécessaire
+        │
+        ▼
+  [Agent 07 : ExporteurMultiFormat] → déclinaison multi-format
 
 Usage :
     cd agents/
@@ -264,7 +267,36 @@ def lancer_studio():
         print(superviseur.afficher_rapport())
         print(f"\n[Système] : État sauvegardé → {saved_path}")
 
-    # ── 14. FIN DE LA PRODUCTION ───────────────────────────────────────────────
+    # ── 14. L'ACTION DE L'AGENT 07 (export multi-format, optionnel) ─────────
+    print("\n[Système] : Préparation des exports multi-format...")
+    export = None
+    try:
+        module_07 = _charger_agent("07_exporteur_multi_format.py")
+        ExporteurMultiFormat = module_07.ExporteurMultiFormat
+        exporteur = ExporteurMultiFormat()
+        export = exporteur.generer_exports(
+            vision_globale=state.get("vision_globale"),
+            visual_style=state.get("visual_style"),
+            technical_notes=state.get("technical_notes"),
+            blender_script=state.get("blender_script"),
+            unreal_script=state.get("unreal_script"),
+            genre=state.get("genre"),
+            tone=state.get("tone"),
+        )
+    except RuntimeError as e:
+        print(f"\n⚠️  {e}")
+        print("   L'export multi-format a échoué — le pipeline continue sans lui.")
+
+    if export is not None:
+        state.update("export_formats", export["formats"])
+        state.update("ffmpeg_script", export["ffmpeg_script"])
+        saved_path = state.save()
+
+        print("\n--- EXPORTS MULTI-FORMAT GÉNÉRÉS ---")
+        print(exporteur.afficher_rapport())
+        print(f"\n[Système] : État sauvegardé → {saved_path}")
+
+    # ── 15. FIN DE LA PRODUCTION ───────────────────────────────────────────────
     print("\n" + "=" * 45)
     print("  🎬 PIPELINE COMPLET — PRODUCTION TERMINÉE")
     print("=" * 45)
@@ -273,9 +305,10 @@ def lancer_studio():
     print("  Les 5 agents créatifs ont livré : vision, structure, scénario,")
     print("  scène Blender et setup Unreal Engine.")
     print("  Le Superviseur a déclenché uniquement les outils nécessaires.")
+    print("  L'Exporteur a préparé les déclinaisons multi-format.")
     print("\n  ✅ Bonne production !")
 
-    # ── 15. COMMANDES HEADLESS PRÊTES À L'EMPLOI ─────────────────────────────
+    # ── 16. COMMANDES HEADLESS PRÊTES À L'EMPLOI ─────────────────────────────
     module_headless = _charger_agent("utils_headless.py")
     output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
@@ -327,6 +360,7 @@ def lancer_studio():
         darktable_notes_path=darktable_notes_path,
         krita_path=krita_path,
         obs_notes_path=obs_notes_path,
+        export_script_path=export["saved_path"] if export else "",
     )
     print()
 
