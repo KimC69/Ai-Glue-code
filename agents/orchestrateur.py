@@ -38,6 +38,22 @@ def charger_module(filepath: str):
     return module
 
 
+class _JournalNul:
+    """
+    Journal inactif (patron « objet nul ») : utilisé quand aucun journal n'est
+    fourni à l'orchestrateur. Toutes les méthodes ne font rien, ce qui permet à
+    l'orchestrateur d'appeler le journal partout sans tester sa présence.
+    Le vrai journal (journal_production.JournalProduction) expose les mêmes
+    méthodes. Ainsi l'orchestrateur reste sans dépendance externe et testable.
+    """
+    def etape_demarree(self, *a, **k): pass
+    def etape_reussie(self, *a, **k): pass
+    def etape_ignoree(self, *a, **k): pass
+    def etape_echouee(self, *a, **k): pass
+    def etape_revisee(self, *a, **k): pass
+    def evenement(self, *a, **k): pass
+
+
 class ErreurEtapeCritique(Exception):
     """Levée quand une étape critique échoue : le pipeline doit s'arrêter."""
 
@@ -134,6 +150,7 @@ class Orchestrateur:
         surcharge_modele: Optional[str] = None,
         reprendre: bool = False,
         interactif: bool = False,
+        journal: Any = None,
     ):
         self.state = state
         self.etapes = etapes
@@ -141,6 +158,9 @@ class Orchestrateur:
         self.surcharge_modele = surcharge_modele
         self.reprendre = reprendre
         self.interactif = interactif
+        # Journal optionnel (SQLite + JSONL). Objet nul par défaut : l'orchestrateur
+        # peut le solliciter à chaque étape sans jamais vérifier sa présence.
+        self.journal = journal or _JournalNul()
 
     # ── Cycle de vie d'une étape ─────────────────────────────────────────────
 
@@ -217,6 +237,7 @@ class Orchestrateur:
     def _gerer_echec(self, etape: Etape, e: Exception, bilan: dict) -> None:
         """Échec définitif d'une étape : arrêt si critique, poursuite sinon."""
         bilan["echouees"].append(etape.nom)
+        self.journal.etape_echouee(etape.numero, etape.nom, e, etape.critique)
 
         # Réinitialise les sorties de l'étape pour ne jamais laisser traîner
         # des données obsolètes d'une production précédente.
@@ -308,6 +329,7 @@ class Orchestrateur:
 
             # decision == "reviser"
             revisions += 1
+            self.journal.etape_revisee(etape.numero, etape.nom, directives)
             if directives:
                 feedbacks.append(directives)
                 print(f"\n[Système] : Révision {revisions} de {etape.nom} "
@@ -360,9 +382,11 @@ class Orchestrateur:
                 print(f"\n[Système] : Étape {etape.numero}/{total} — {etape.nom} : "
                       "déjà complétée, ignorée (--reprendre).")
                 bilan["ignorees"].append(etape.nom)
+                self.journal.etape_ignoree(etape.numero, etape.nom)
                 continue
 
             print(f"\n[Système] : Étape {etape.numero}/{total} — {etape.nom}...")
+            self.journal.etape_demarree(etape.numero, etape.nom)
             debut = time.time()
 
             try:
@@ -383,6 +407,8 @@ class Orchestrateur:
             bilan["durees"][etape.nom] = duree
             if revisions:
                 bilan["revisions"][etape.nom] = revisions
+            self.journal.etape_reussie(etape.numero, etape.nom,
+                                       duree_s=duree, revisions=revisions)
 
         self._afficher_bilan(bilan)
         return bilan

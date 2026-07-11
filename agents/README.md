@@ -161,6 +161,28 @@ mot de passe SSH (secret, jamais commité, régénéré au moindre doute) et
 n'exposez le worker (`--hote 0.0.0.0`) que sur un réseau de confiance,
 derrière un pare-feu ou un tunnel SSH.
 
+## Historique et journaux (base de données + logs structurés)
+
+Chaque exécution est tracée automatiquement, sans configuration, dans deux
+supports complémentaires :
+
+- **Base SQLite `output/studio.db`** — historique interrogeable : productions,
+  étapes (statut, durée, révisions), événements. C'est la matière des futures
+  interfaces web et Android (tableau de bord, rapports).
+- **Journal structuré `output/journaux/<id>.jsonl`** — un événement JSON par
+  ligne (démarrage, étape démarrée/réussie/ignorée/échouée, révision, fin).
+  Facile à suivre en direct (`tail -f`) ou à consommer par une interface.
+
+```bash
+python main.py --historique          # liste les dernières productions puis quitte
+```
+
+Une reprise (`--reprendre`) réutilise le même identifiant de production : ses
+nouvelles étapes s'ajoutent à l'historique existant au lieu d'en créer un
+nouveau. La journalisation ne peut jamais interrompre une production : si la
+base ou le fichier de log est indisponible, le studio le signale une fois et
+continue sans traces.
+
 ## Modèles disponibles
 
 | Modèle | Coût | Qualité | Recommandé pour |
@@ -185,8 +207,9 @@ derrière un pare-feu ou un tunnel SSH.
 | `utils_headless.py` | Génère les commandes headless (Blender, Unreal, GIMP, montage, export FFmpeg) prêtes à copier-coller |
 | `worker_distant.py` | Serveur d'exécution distant (stdlib pur, fichier autonome) — à lancer sur la machine de rendu ; API HTTP protégée par jeton |
 | `client_worker.py` | Client du worker + `ExecuteurDistant` branché dans le pipeline (étapes de rendu distantes, rapatriement journaux/fichiers) |
-| `orchestrateur.py` | Moteur d'exécution central — `Etape` (description déclarative) + `Orchestrateur` (retry, validation des sorties, reprise `--reprendre`, bilan) |
-| `main.py` | Point d'entrée CLI — définit le pipeline déclaratif (7 `Etape`) et délègue l'exécution à l'`Orchestrateur` |
+| `orchestrateur.py` | Moteur d'exécution central — `Etape` (description déclarative) + `Orchestrateur` (retry, validation des sorties, reprise `--reprendre`, bilan, notification du journal) |
+| `journal_production.py` | Journal de production (stdlib pur) — base SQLite `output/studio.db` (historique interrogeable) + logs structurés JSONL `output/journaux/<id>.jsonl` ; mode dégradé si l'écriture échoue |
+| `main.py` | Point d'entrée CLI — définit le pipeline déclaratif (7 `Etape`), crée le journal et délègue l'exécution à l'`Orchestrateur` |
 
 Chaque agent expose une classe avec une méthode métier dédiée (`generer_vision()`,
 `construire_structure()`, `ecrire_scenario()`, `creer_scene_blender()`,

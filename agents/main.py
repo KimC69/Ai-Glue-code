@@ -33,12 +33,14 @@ Usage :
 import argparse
 import os
 import sys
+import uuid
 
 from dotenv import load_dotenv
 
 from shared_state import WorldState
 from orchestrateur import Etape, Orchestrateur, ErreurEtapeCritique, ArretUtilisateur
 from client_worker import ClientWorker, ExecuteurDistant, ErreurWorker
+from journal_production import JournalProduction
 import utils_headless
 
 # Chargement des variables d'environnement (.env)
@@ -419,6 +421,51 @@ def _afficher_recap_final(state: WorldState, bilan: dict) -> None:
     print()
 
 
+# ── Journal / historique ──────────────────────────────────────────────────────
+
+def _mode_execution(args) -> str:
+    """Résumé du mode d'exécution, tracé dans le journal (ex : « interactif+worker »)."""
+    modes = []
+    if args.interactif:
+        modes.append("interactif")
+    if args.worker:
+        modes.append("worker")
+    if args.reprendre:
+        modes.append("reprise")
+    return "+".join(modes) or "standard"
+
+
+def _afficher_historique(limite: int = 20) -> None:
+    """Affiche les dernières productions enregistrées dans output/studio.db."""
+    journal = JournalProduction()          # ouverture en lecture (aucune production créée)
+    productions = journal.lister_productions(limite=limite)
+    journal.fermer()
+
+    print("\n" + "═" * 68)
+    print("  🗂  HISTORIQUE DES PRODUCTIONS")
+    print("═" * 68)
+    if not productions:
+        print("  (aucune production enregistrée pour l'instant)")
+        print("═" * 68 + "\n")
+        return
+
+    for p in productions:
+        idee = (p["idee"] or "").strip().replace("\n", " ")
+        if len(idee) > 52:
+            idee = idee[:49] + "..."
+        symbole = {"terminee": "✅", "echec": "❌",
+                   "arretee": "⏸️ ", "en_cours": "⏳"}.get(p["statut"], "•")
+        print(f"\n  {symbole} {p['id']}  ({p['statut']})")
+        print(f"     Idée    : {idee}")
+        print(f"     Étapes  : {p['etapes_reussies']} réussie(s)"
+              f"   |   Modèle : {p['modele'] or '—'}   |   Mode : {p['mode'] or '—'}")
+        print(f"     Démarrée: {p['demarree_le']}"
+              + (f"   →   {p['terminee_le']}" if p["terminee_le"] else ""))
+    print("\n" + "═" * 68)
+    print(f"  Détail d'une production : ouvrez output/journaux/<id>.jsonl")
+    print("═" * 68 + "\n")
+
+
 # ── Point d'entrée ────────────────────────────────────────────────────────────
 
 def lancer_studio(argv=None):
@@ -443,7 +490,15 @@ def lancer_studio(argv=None):
     parser.add_argument("--worker-jeton", type=str, default="",
                         help="Jeton d'accès au worker (sinon : variable WORKER_JETON, "
                              "affiché par le worker à son démarrage)")
+    parser.add_argument("--historique", action="store_true",
+                        help="Affiche l'historique des productions (base output/studio.db) "
+                             "puis quitte, sans rien lancer")
     args = parser.parse_args(argv)
+
+    # ── Historique : lecture seule, aucune production lancée ──────────────────
+    if args.historique:
+        _afficher_historique()
+        return
 
     if args.interactif and not sys.stdin.isatty():
         print("[Avertissement] : --interactif sans terminal interactif — "
@@ -516,7 +571,22 @@ def lancer_studio(argv=None):
 
     state.update("idea", concept_initial)
 
-    # ── 3. Exécution du pipeline par l'orchestrateur central ────────────────
+    # ── 3. Journal de production (SQLite + logs structurés JSONL) ─────────────
+    # L'identifiant de production est persisté dans l'état : une reprise
+    # (--reprendre) réutilise le même identifiant, si bien que ses nouvelles
+    # étapes s'ajoutent à l'historique de la production d'origine au lieu d'en
+    # créer une nouvelle.
+    production_id = str(state.get("production_id", "")).strip()
+    if not production_id:
+        production_id = uuid.uuid4().hex[:12]
+        state.update("production_id", production_id)
+    journal = JournalProduction(production_id=production_id)
+    journal.demarrer_production(
+        idee=concept_initial,
+        modele=args.model.strip() or "défaut",
+        mode=_mode_execution(args))
+
+    # ── 4. Exécution du pipeline par l'orchestrateur central ────────────────
     orchestrateur = Orchestrateur(
         state=state,
         etapes=construire_pipeline(executeur_distant, outils_worker),
@@ -524,20 +594,39 @@ def lancer_studio(argv=None):
         surcharge_modele=args.model.strip() or None,
         reprendre=args.reprendre,
         interactif=args.interactif,
+        journal=journal,
     )
 
+    # try/finally : la fermeture du journal (et donc de la connexion SQLite)
+    # est garantie sur TOUS les chemins de sortie, y compris une exception
+    # inattendue ou un sys.exit (qui lève SystemExit, propagé par le finally).
     try:
-        bilan = orchestrateur.executer()
-    except ErreurEtapeCritique:
-        # L'orchestrateur a déjà tout affiché et sauvegardé l'état partiel.
-        sys.exit(1)
-    except ArretUtilisateur:
-        # Arrêt volontaire à un point de validation : état déjà sauvegardé,
-        # reprise possible avec --reprendre. Ce n'est pas une erreur.
-        sys.exit(0)
+        try:
+            bilan = orchestrateur.executer()
+        except ErreurEtapeCritique:
+            # L'orchestrateur a déjà tout affiché et sauvegardé l'état partiel.
+            journal.terminer_production("echec")
+            sys.exit(1)
+        except ArretUtilisateur:
+            # Arrêt volontaire à un point de validation : état déjà sauvegardé,
+            # reprise possible avec --reprendre. Ce n'est pas une erreur.
+            journal.terminer_production("arretee")
+            sys.exit(0)
+        except Exception:
+            # Exception inattendue (hors étapes déjà gérées) : marquer la
+            # production en échec plutôt que de la laisser « en_cours », puis
+            # laisser l'erreur remonter. (SystemExit n'est pas une Exception :
+            # les sys.exit ci-dessus ne sont pas interceptés ici.)
+            journal.terminer_production("echec")
+            raise
+        journal.terminer_production("terminee")
+    finally:
+        journal.fermer()
 
-    # ── 4. Récapitulatif final ───────────────────────────────────────────────
+    # ── 5. Récapitulatif final ───────────────────────────────────────────────
     _afficher_recap_final(state, bilan)
+    print(f"  🗂  Historique : python main.py --historique  "
+          f"(production {production_id})")
 
 
 if __name__ == "__main__":

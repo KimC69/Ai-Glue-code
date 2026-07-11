@@ -41,7 +41,7 @@ Le pipeline est décrit comme des données (`Etape` : agent, entrées, sorties, 
 
 Les rendus lourds (Blender, Unreal, FFmpeg) s'exécutent sur une autre machine via un couple client/serveur HTTP en stdlib pur (pas SSH) : `worker_distant.py` (autonome, copiable seul) + `client_worker.py`. Auth par jeton `X-Jeton` (hmac.compare_digest), lanceurs whitelistés (blender --background --python / bash pour les .sh), un seul travail à la fois, chaînage `poursuivre` (un travail s'exécute dans le dossier d'un travail terminé — l'export FFmpeg y retrouve la vidéo du rendu Blender).
 
-**Why:** HTTP stdlib = zéro dépendance des deux côtés et testable dans cet environnement (SSH ne l'était pas). Le modèle de confiance est assumé : le worker exécute des scripts arbitraires par fonction, donc **le jeton équivaut à un accès shell** — la doc ne doit jamais prétendre que la liste blanche empêche l'exécution de code arbitraire (erreur relevée en revue). Les vidéos rendues pèsent des Go : tout transfert (journal, fichiers) doit être en flux (morceaux 64 Kio, fichier `.partiel` renommé à la fin), jamais un `read()` complet en mémoire (2e erreur relevée en revue).
+**Why:** HTTP stdlib = zéro dépendance des deux côtés et testable dans cet environnement (SSH ne l'était pas). Le modèle de confiance est assumé : le worker exécute des scripts arbitraires par fonction, donc **le jeton équivaut à un accès shell** — la doc ne doit jamais prétendre que la liste blanche empêche l'exécution de code arbitraire. Les vidéos rendues pèsent des Go : tout transfert (journal, fichiers) doit être en flux (morceaux 64 Kio, fichier `.partiel` renommé à la fin), jamais un `read()` complet en mémoire.
 
 **How to apply:**
 - Étape non-LLM dans le pipeline = `Etape.fabrique` (callable retournant l'« agent » pré-construit, court-circuite importlib).
@@ -49,6 +49,18 @@ Les rendus lourds (Blender, Unreal, FFmpeg) s'exécutent sur une autre machine v
 - Clés d'état `rendu_<outil>_{statut,travail_id,journal,fichiers}` ; seule `_statut` est `cles_sortie`, les quatre vont dans `purger`.
 - Journaux + fichiers rapatriés dans `output/rendus/<outil>/` MÊME en cas d'échec (diagnostic), l'exception ErreurWorker est levée après.
 - Flux recommandé : produire en local puis `--reprendre --worker URL` (ne relance que les rendus manquants).
+
+## Journal de production (BDD SQLite + logs structurés JSONL)
+
+Chaque exécution est tracée dans `journal_production.py` (stdlib pur : sqlite3 + json) : base `output/studio.db` (tables productions / etapes / evenements, interrogeable pour les futures interfaces web/Android) + un JSONL par production `output/journaux/<id>.jsonl` (un événement par ligne, streamable). L'orchestrateur reçoit un `journal` optionnel et le notifie aux points clés (etape_demarree/reussie/ignoree/echouee/revisee) ; par défaut c'est un **objet nul** (`_JournalNul` dans orchestrateur.py) — toutes méthodes no-op.
+
+**Why:** l'objet nul garde l'orchestrateur sans dépendance et testable sans journal (les tests le construisent sans `journal=`). La journalisation ne doit JAMAIS casser une production : toute erreur d'E/S (disque plein, dossier lecture seule, base verrouillée) est absorbée et signalée une fois, puis le journal passe en **mode dégradé** (writes no-op) — l'observabilité ne réduit pas la fiabilité.
+
+**How to apply:**
+- Nouvel événement à tracer = appeler `self.journal.<methode>(...)` dans l'orchestrateur ; ajouter la méthode à `_JournalNul` ET à `JournalProduction` (mêmes signatures).
+- L'identifiant de production est persisté dans `world_state.json` (`production_id`) : `--reprendre` le réutilise → les étapes de la reprise s'ajoutent à la même ligne production (demarrer_production fait INSERT OR IGNORE puis UPDATE statut='en_cours').
+- Cohérence SQLite/JSONL en best-effort : `evenement()` écrit les deux sous un même `RLock` (ordre identique entre les flux) ; si un support est en panne, l'autre continue seul. Une donnée non sérialisable ne dégrade que sa propre ligne, jamais tout le flux (default=str + repli), et n'est jamais fatale.
+- Consultation : `python main.py --historique` (lecture seule, ne crée pas de production).
 
 ## Human-in-the-loop (--interactif)
 

@@ -13,7 +13,7 @@ Issue de l'audit complet demandé par l'utilisateur. **Règle de pilotage : c'es
 2. ✅ Orchestrateur central déclaratif — planification, dispatch, retry, validation des sorties, reprise, bilan.
 3. ✅ Human-in-the-loop — `--interactif` : valider / réviser avec directives / arrêter proprement (étapes créatives 01–05).
 4. ✅ Worker distant — exécution de Blender / Unreal / FFmpeg sur une autre machine (HTTP stdlib + jeton), rapatriement des résultats.
-5. ⬜ Base de données et logs structurés.
+5. ✅ Base de données et logs structurés — SQLite `output/studio.db` + JSONL par production ; `--historique` ; objet nul + mode dégradé (voir agent-architecture.md).
 6. ⬜ Authentification et sécurité.
 7. ⬜ API backend.
 8. ⬜ Interface web.
