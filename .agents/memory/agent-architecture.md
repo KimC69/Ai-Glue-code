@@ -62,6 +62,18 @@ Chaque exécution est tracée dans `journal_production.py` (stdlib pur : sqlite3
 - Cohérence SQLite/JSONL en best-effort : `evenement()` écrit les deux sous un même `RLock` (ordre identique entre les flux) ; si un support est en panne, l'autre continue seul. Une donnée non sérialisable ne dégrade que sa propre ligne, jamais tout le flux (default=str + repli), et n'est jamais fatale.
 - Consultation : `python main.py --historique` (lecture seule, ne crée pas de production).
 
+## Authentification et sécurité (securite.py)
+
+Fondation d'auth stdlib pur, base dédiée séparée du journal, pour les futures API/interfaces : comptes (mots de passe hachés pbkdf2), rôles→permissions, jetons de session signés HMAC **autonomes** (vérifiables sans la base) + révocation en base.
+
+**Why (le principe qui gouverne tout) :** contrairement au journal (mode dégradé = writes no-op pour ne jamais casser une production), la sécurité **ÉCHOUE FERMÉ** — toute vérif qui ne peut aboutir (base HS, signature invalide, jeton expiré, révocation invérifiable, jti absent/non-str, claim mal typé) REFUSE. Un doute n'autorise jamais. Corollaire testé en revue : un jeton forgé mais bien signé ne doit JAMAIS faire remonter une exception native — tout parsing/typage de claim est normalisé en `ErreurSecurite`, sinon l'API tomberait en 500/DoS.
+
+**How to apply:**
+- Nouveau droit = éditer le dict `PERMISSIONS` (source unique), puis contrôler via `a_permission`/`jeton_autorise`.
+- Clé de signature = secret `SESSION_SECRET` (jamais affiché) ; sans lui la gestion des comptes marche mais toute opération jeton lève `ErreurSecurite`. Le constructeur retombe sur l'env → pour tester l'absence de clé, `os.environ.pop("SESSION_SECRET")` d'abord.
+- Itérations pbkdf2 stockées PAR utilisateur = on peut durcir plus tard sans invalider les comptes existants.
+- **Décision de périmètre :** la CLI locale n'exige volontairement PAS encore de connexion (ne pas verrouiller l'utilisateur hors de son propre outil) ; l'activation des contrôles est reportée à l'API (étape 7).
+
 ## Human-in-the-loop (--interactif)
 
 Les étapes créatives (01–05) portent `point_validation=True` + `champ_feedback` : après exécution réussie, l'utilisateur valide, demande une révision, ou arrête proprement (`ArretUtilisateur` → exit 0, reprise via `--reprendre`). Les directives de révision sont réinjectées en APPEND dans le kwarg d'entrée désigné par `champ_feedback` — aucun agent ni prompt n'a été modifié.

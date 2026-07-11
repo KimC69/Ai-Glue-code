@@ -14,7 +14,7 @@ Issue de l'audit complet demandé par l'utilisateur. **Règle de pilotage : c'es
 3. ✅ Human-in-the-loop — `--interactif` : valider / réviser avec directives / arrêter proprement (étapes créatives 01–05).
 4. ✅ Worker distant — exécution de Blender / Unreal / FFmpeg sur une autre machine (HTTP stdlib + jeton), rapatriement des résultats.
 5. ✅ Base de données et logs structurés — SQLite `output/studio.db` + JSONL par production ; `--historique` ; objet nul + mode dégradé (voir agent-architecture.md).
-6. ⬜ Authentification et sécurité.
+6. ✅ Authentification et sécurité — module `securite.py` : comptes (pbkdf2), rôles admin/operateur/observateur, jetons de session signés (SESSION_SECRET) ; échoue fermé ; base `output/securite.db` (voir agent-architecture.md). N'active pas encore de contrôle sur la CLI (ce sera l'API).
 7. ⬜ API backend.
 8. ⬜ Interface web.
 9. ⬜ Application Android — télécommande + tableau de bord : chat avec les agents, envoi d'instructions, suivi des tâches, notifications, rapports, autorisation d'actions.

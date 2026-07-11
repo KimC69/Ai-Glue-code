@@ -183,6 +183,40 @@ nouveau. La journalisation ne peut jamais interrompre une production : si la
 base ou le fichier de log est indisponible, le studio le signale une fois et
 continue sans traces.
 
+## Comptes et sécurité (authentification)
+
+Fondation d'authentification — la brique qui permettra à l'API (à venir) puis
+aux interfaces web/Android de savoir **qui** a le droit de commander le studio.
+Tout est en bibliothèque standard (aucune dépendance) et stocké dans une base
+dédiée `output/securite.db`, séparée de l'historique créatif.
+
+- **Mots de passe jamais en clair** : hachage pbkdf2-hmac-sha256 avec sel
+  aléatoire par utilisateur.
+- **Trois rôles** : `admin` (tout, y compris gérer les comptes), `operateur`
+  (lancer et piloter des productions), `observateur` (lecture seule).
+- **Jetons de session signés et autonomes** : à la connexion, un jeton signé
+  (via le secret `SESSION_SECRET`) contient l'utilisateur, son rôle et une date
+  d'expiration. Un service peut le vérifier avec la seule clé de signature, sans
+  interroger la base. Révocables.
+
+```bash
+python main.py --creer-utilisateur alice --role admin   # mot de passe demandé au clavier
+python main.py --lister-utilisateurs
+python main.py --connexion alice                        # affiche un jeton de session
+python main.py --changer-mdp alice
+python main.py --definir-role alice --role operateur
+python main.py --supprimer-utilisateur alice
+```
+
+> Les mots de passe sont toujours saisis au clavier (masqués), jamais passés en
+> argument (sinon ils resteraient dans l'historique du shell). Ces commandes
+> s'exécutent puis quittent, sans lancer de production. À ce stade la CLI locale
+> n'exige pas encore de connexion — c'est l'API qui activera ces contrôles.
+>
+> Principe : le module **échoue fermé** — toute vérification qui ne peut pas
+> aboutir (base indisponible, signature invalide, jeton expiré ou révoqué)
+> refuse l'accès. On ne laisse jamais un doute autoriser quelqu'un.
+
 ## Modèles disponibles
 
 | Modèle | Coût | Qualité | Recommandé pour |
@@ -209,6 +243,7 @@ continue sans traces.
 | `client_worker.py` | Client du worker + `ExecuteurDistant` branché dans le pipeline (étapes de rendu distantes, rapatriement journaux/fichiers) |
 | `orchestrateur.py` | Moteur d'exécution central — `Etape` (description déclarative) + `Orchestrateur` (retry, validation des sorties, reprise `--reprendre`, bilan, notification du journal) |
 | `journal_production.py` | Journal de production (stdlib pur) — base SQLite `output/studio.db` (historique interrogeable) + logs structurés JSONL `output/journaux/<id>.jsonl` ; mode dégradé si l'écriture échoue |
+| `securite.py` | Fondation d'authentification (stdlib pur) — comptes + mots de passe hachés (pbkdf2), rôles/permissions, jetons de session signés (base `output/securite.db`) ; échoue fermé |
 | `main.py` | Point d'entrée CLI — définit le pipeline déclaratif (7 `Etape`), crée le journal et délègue l'exécution à l'`Orchestrateur` |
 
 Chaque agent expose une classe avec une méthode métier dédiée (`generer_vision()`,

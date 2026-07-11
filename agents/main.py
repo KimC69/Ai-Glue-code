@@ -31,6 +31,7 @@ Usage :
 """
 
 import argparse
+import getpass
 import os
 import sys
 import uuid
@@ -41,6 +42,7 @@ from shared_state import WorldState
 from orchestrateur import Etape, Orchestrateur, ErreurEtapeCritique, ArretUtilisateur
 from client_worker import ClientWorker, ExecuteurDistant, ErreurWorker
 from journal_production import JournalProduction
+from securite import Securite, ErreurSecurite, ROLES_VALIDES, ROLE_DEFAUT
 import utils_headless
 
 # Chargement des variables d'environnement (.env)
@@ -466,6 +468,100 @@ def _afficher_historique(limite: int = 20) -> None:
     print("═" * 68 + "\n")
 
 
+# ── Sécurité : gestion des comptes (mode administration) ───────────────────────
+
+def _saisir_mot_de_passe(confirmer: bool = False) -> str:
+    """Demande un mot de passe sans l'afficher (getpass). Si confirmer=True,
+    le redemande et vérifie la correspondance."""
+    mdp = getpass.getpass("Mot de passe : ")
+    if confirmer and mdp != getpass.getpass("Confirmez le mot de passe : "):
+        print("[Erreur] : les deux mots de passe ne correspondent pas.")
+        sys.exit(1)
+    return mdp
+
+
+def _gerer_securite(args) -> bool:
+    """Traite une commande de gestion des comptes (création, liste, etc.) puis
+    retourne True. Retourne False si aucune commande de sécurité n'est demandée.
+
+    Ces commandes s'exécutent puis quittent, sans lancer de production — comme
+    --historique. Les mots de passe sont TOUJOURS saisis au clavier (getpass),
+    jamais passés en argument de ligne de commande (sinon ils resteraient dans
+    l'historique du shell et la liste des processus)."""
+    commandes = (args.creer_utilisateur or args.lister_utilisateurs
+                 or args.changer_mdp or args.supprimer_utilisateur
+                 or args.connexion or args.definir_role)
+    if not commandes:
+        return False
+
+    try:
+        securite = Securite()
+    except ErreurSecurite as e:
+        print(f"[Erreur sécurité] : {e}")
+        sys.exit(1)
+
+    try:
+        if args.creer_utilisateur:
+            role = args.role or ROLE_DEFAUT
+            print(f"Création de l'utilisateur {args.creer_utilisateur!r} "
+                  f"(rôle : {role})")
+            mdp = _saisir_mot_de_passe(confirmer=True)
+            securite.creer_utilisateur(args.creer_utilisateur, mdp, role)
+            print(f"[OK] Utilisateur {args.creer_utilisateur!r} créé.")
+
+        elif args.changer_mdp:
+            print(f"Changement du mot de passe de {args.changer_mdp!r}")
+            mdp = _saisir_mot_de_passe(confirmer=True)
+            securite.changer_mot_de_passe(args.changer_mdp, mdp)
+            print(f"[OK] Mot de passe de {args.changer_mdp!r} mis à jour.")
+
+        elif args.definir_role:
+            if not args.role:
+                print("[Erreur] : --definir-role NOM nécessite aussi --role RÔLE.")
+                sys.exit(1)
+            securite.definir_role(args.definir_role, args.role)
+            print(f"[OK] {args.definir_role!r} a désormais le rôle {args.role!r}.")
+
+        elif args.supprimer_utilisateur:
+            securite.supprimer_utilisateur(args.supprimer_utilisateur)
+            print(f"[OK] Utilisateur {args.supprimer_utilisateur!r} supprimé.")
+
+        elif args.connexion:
+            print(f"Connexion de {args.connexion!r}")
+            mdp = _saisir_mot_de_passe()
+            jeton = securite.authentifier(args.connexion, mdp)
+            print("[OK] Connexion réussie. Jeton de session "
+                  "(à transmettre à l'API à l'étape 7) :\n")
+            print(f"  {jeton}\n")
+            print("Ce jeton expire automatiquement ; ne le partagez pas.")
+
+        elif args.lister_utilisateurs:
+            _afficher_utilisateurs(securite.lister_utilisateurs())
+
+    except ErreurSecurite as e:
+        print(f"[Erreur sécurité] : {e}")
+        securite.fermer()
+        sys.exit(1)
+
+    securite.fermer()
+    return True
+
+
+def _afficher_utilisateurs(utilisateurs: list) -> None:
+    print("\n" + "═" * 60)
+    print("  👤  UTILISATEURS")
+    print("═" * 60)
+    if not utilisateurs:
+        print("  (aucun utilisateur — créez-en un avec --creer-utilisateur NOM)")
+        print("═" * 60 + "\n")
+        return
+    for u in utilisateurs:
+        etat = "actif" if u["actif"] else "désactivé"
+        print(f"  • {u['nom']:<20} rôle : {u['role']:<12} ({etat})")
+        print(f"    créé le {u['cree_le']}")
+    print("═" * 60 + "\n")
+
+
 # ── Point d'entrée ────────────────────────────────────────────────────────────
 
 def lancer_studio(argv=None):
@@ -493,11 +589,42 @@ def lancer_studio(argv=None):
     parser.add_argument("--historique", action="store_true",
                         help="Affiche l'historique des productions (base output/studio.db) "
                              "puis quitte, sans rien lancer")
+
+    # ── Gestion des comptes (authentification, étape 6) ──────────────────────
+    # Ces commandes s'exécutent puis quittent, sans lancer de production. Les
+    # mots de passe sont saisis au clavier, jamais en argument.
+    securite_grp = parser.add_argument_group(
+        "Comptes et sécurité",
+        "Gestion des utilisateurs qui pourront commander le studio via l'API "
+        "(étape 7) et les interfaces à venir. Base : output/securite.db.")
+    securite_grp.add_argument("--creer-utilisateur", metavar="NOM", default="",
+                              help="Crée un compte (mot de passe demandé au clavier) ; "
+                                   "combiner avec --role")
+    securite_grp.add_argument("--role", default="",
+                              choices=sorted(ROLES_VALIDES),
+                              help=f"Rôle du compte (défaut : {ROLE_DEFAUT}) — "
+                                   "utilisé avec --creer-utilisateur ou --definir-role")
+    securite_grp.add_argument("--definir-role", metavar="NOM", default="",
+                              help="Change le rôle d'un utilisateur existant "
+                                   "(nécessite --role)")
+    securite_grp.add_argument("--changer-mdp", metavar="NOM", default="",
+                              help="Change le mot de passe d'un utilisateur")
+    securite_grp.add_argument("--supprimer-utilisateur", metavar="NOM", default="",
+                              help="Supprime un compte")
+    securite_grp.add_argument("--lister-utilisateurs", action="store_true",
+                              help="Affiche la liste des comptes puis quitte")
+    securite_grp.add_argument("--connexion", metavar="NOM", default="",
+                              help="Vérifie un mot de passe et affiche un jeton de "
+                                   "session (à utiliser par l'API à l'étape 7)")
     args = parser.parse_args(argv)
 
     # ── Historique : lecture seule, aucune production lancée ──────────────────
     if args.historique:
         _afficher_historique()
+        return
+
+    # ── Commandes de gestion des comptes : s'exécutent puis quittent ─────────
+    if _gerer_securite(args):
         return
 
     if args.interactif and not sys.stdin.isatty():
