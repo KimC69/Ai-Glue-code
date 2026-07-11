@@ -1,1 +1,1 @@
-- [Architecture des agents](agent-architecture.md) — BaseAgent + pipeline déclaratif (Etape/Orchestrateur) : retry, validation, reprise, HITL --interactif ; agents sans sys.exit().
+- [Architecture des agents](agent-architecture.md) — BaseAgent + pipeline déclaratif (retry, reprise, HITL) ; worker distant HTTP stdlib : jeton = accès shell, transferts en flux, Etape.fabrique non-LLM.

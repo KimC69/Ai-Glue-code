@@ -27,6 +27,7 @@ Usage :
     python main.py --model gpt-4o                      # force un modèle partout
     python main.py --reprendre                         # reprend après un échec
     python main.py --interactif                        # validation humaine (HITL)
+    python main.py --reprendre --worker http://IP:8765 # rendu sur machine distante
 """
 
 import argparse
@@ -37,6 +38,7 @@ from dotenv import load_dotenv
 
 from shared_state import WorldState
 from orchestrateur import Etape, Orchestrateur, ErreurEtapeCritique, ArretUtilisateur
+from client_worker import ClientWorker, ExecuteurDistant, ErreurWorker
 import utils_headless
 
 # Chargement des variables d'environnement (.env)
@@ -104,9 +106,16 @@ def _enregistrer_export(state, agent, export):
 
 # ── Définition déclarative du pipeline ───────────────────────────────────────
 
-def construire_pipeline() -> list:
-    """Décrit les 7 étapes du studio. L'Orchestrateur se charge du reste."""
-    return [
+def construire_pipeline(executeur_distant=None, outils_worker=None) -> list:
+    """
+    Décrit les étapes du studio. L'Orchestrateur se charge du reste.
+
+    Si un exécuteur distant est fourni (--worker), les étapes de rendu
+    (exécution des scripts Blender / Unreal / FFmpeg sur la machine de
+    rendu) sont ajoutées à la suite — uniquement pour les outils que le
+    worker déclare disponibles.
+    """
+    etapes = [
         Etape(
             numero=1, nom="Agent 01 - Directeur Créatif",
             fichier="01_directeur_creatif.py",
@@ -228,6 +237,113 @@ def construire_pipeline() -> list:
         ),
     ]
 
+    if executeur_distant is not None:
+        etapes += etapes_rendu_distant(executeur_distant, outils_worker or {},
+                                       prochain_numero=len(etapes) + 1)
+    return etapes
+
+
+# ── Étapes d'exécution distante (worker de rendu) ────────────────────────────
+
+def _enregistrer_rendu(prefixe: str):
+    """Callback d'enregistrement d'une étape de rendu distant."""
+    def _callback(state, agent, resultat):
+        state.update(f"rendu_{prefixe}_statut", "ok")
+        state.update(f"rendu_{prefixe}_travail_id", resultat["travail_id"])
+        state.update(f"rendu_{prefixe}_journal", resultat["journal_path"])
+        state.update(f"rendu_{prefixe}_fichiers", resultat["dossier_fichiers"])
+    return _callback
+
+
+def _purger_rendu(prefixe: str) -> tuple:
+    return (f"rendu_{prefixe}_statut", f"rendu_{prefixe}_travail_id",
+            f"rendu_{prefixe}_journal", f"rendu_{prefixe}_fichiers")
+
+
+def _afficher_rendu(agent, resultat) -> str:
+    lignes = [f"  Durée sur le worker : {resultat['duree']:.0f}s",
+              f"  Journal rapatrié    : {resultat['journal_path']}"]
+    if resultat["nb_fichiers"]:
+        lignes.append(f"  Fichiers produits   : {resultat['nb_fichiers']} "
+                      f"→ {resultat['dossier_fichiers']}")
+    else:
+        lignes.append("  Fichiers produits   : aucun (détail dans le journal)")
+    return "\n".join(lignes)
+
+
+def etapes_rendu_distant(executeur, outils: dict, prochain_numero: int) -> list:
+    """
+    Étapes 8+ : exécution des scripts générés, sur le worker distant.
+    Toutes optionnelles (un rendu raté n'invalide pas la production) et
+    en un seul essai (relancer un rendu coûteux se décide à la main,
+    via --reprendre).
+    """
+    etapes = []
+    conseil = ("Conseil : le journal complet du worker est rapatrié dans "
+               "agents/output/rendus/ — il contient l'erreur exacte.")
+
+    def indisponible(outil):
+        print(f"[Avertissement] : « {outil} » indisponible sur le worker — "
+              "étape de rendu distante non planifiée.")
+
+    if outils.get("blender"):
+        etapes.append(Etape(
+            numero=prochain_numero + len(etapes),
+            nom="Rendu Blender (worker distant)",
+            fichier="", classe="", methode="executer_blender",
+            fabrique=lambda: executeur,
+            preparer=lambda s: {"chemin_script": s.get("blender_saved_path")},
+            enregistrer=_enregistrer_rendu("blender"),
+            cles_sortie=("rendu_blender_statut",),
+            titre="RENDU BLENDER EXÉCUTÉ SUR LE WORKER",
+            afficher=_afficher_rendu,
+            critique=False, essais=1, conseil=conseil,
+            purger=_purger_rendu("blender"),
+        ))
+    else:
+        indisponible("blender")
+
+    if outils.get("unreal"):
+        etapes.append(Etape(
+            numero=prochain_numero + len(etapes),
+            nom="Setup Unreal (worker distant)",
+            fichier="", classe="", methode="executer_unreal",
+            fabrique=lambda: executeur,
+            preparer=lambda s: {"chemin_script": s.get("unreal_saved_path")},
+            enregistrer=_enregistrer_rendu("unreal"),
+            cles_sortie=("rendu_unreal_statut",),
+            titre="SETUP UNREAL EXÉCUTÉ SUR LE WORKER",
+            afficher=_afficher_rendu,
+            critique=False, essais=1, conseil=conseil,
+            purger=_purger_rendu("unreal"),
+        ))
+    else:
+        indisponible("unreal")
+
+    if outils.get("ffmpeg"):
+        etapes.append(Etape(
+            numero=prochain_numero + len(etapes),
+            nom="Exports FFmpeg (worker distant)",
+            fichier="", classe="", methode="executer_ffmpeg",
+            fabrique=lambda: executeur,
+            # Chaînage : l'export s'exécute dans le dossier du rendu Blender
+            # (si effectué), où la vidéo master est disponible.
+            preparer=lambda s: {
+                "chemin_script": s.get("export_saved_path"),
+                "poursuivre_id": s.get("rendu_blender_travail_id", ""),
+            },
+            enregistrer=_enregistrer_rendu("ffmpeg"),
+            cles_sortie=("rendu_ffmpeg_statut",),
+            titre="EXPORTS FFMPEG EXÉCUTÉS SUR LE WORKER",
+            afficher=_afficher_rendu,
+            critique=False, essais=1, conseil=conseil,
+            purger=_purger_rendu("ffmpeg"),
+        ))
+    else:
+        indisponible("ffmpeg")
+
+    return etapes
+
 
 # ── Récapitulatif final et commandes headless ────────────────────────────────
 
@@ -268,6 +384,20 @@ def _afficher_recap_final(state: WorldState, bilan: dict) -> None:
     obs_notes_path = _ecrire_notes_si_necessaire(
         state.get("needs_obs"), state.get("obs_notes"), "notes_obs.txt")
 
+    # Rendus effectués sur le worker distant (--worker)
+    rendus = [(prefixe, label) for prefixe, label in
+              (("blender", "Rendu Blender"), ("unreal", "Setup Unreal"),
+               ("ffmpeg", "Exports FFmpeg"))
+              if state.get(f"rendu_{prefixe}_statut") == "ok"]
+    if rendus:
+        print("\n  ▶ RENDUS EXÉCUTÉS SUR LE WORKER DISTANT :")
+        for prefixe, label in rendus:
+            print(f"    ✅ {label}")
+            print(f"       Journal  : {state.get(f'rendu_{prefixe}_journal')}")
+            dossier_fichiers = state.get(f"rendu_{prefixe}_fichiers")
+            if dossier_fichiers:
+                print(f"       Fichiers : {dossier_fichiers}")
+
     blender_path = state.get("blender_saved_path", "")
     unreal_path = state.get("unreal_saved_path", "")
 
@@ -306,11 +436,43 @@ def lancer_studio(argv=None):
                         help="Active les points de validation Human-in-the-loop : après "
                              "chaque étape créative (Agents 01 à 05), validez le résultat, "
                              "demandez une révision avec vos directives, ou arrêtez proprement")
+    parser.add_argument("--worker", type=str, default="",
+                        help="URL du worker distant (ex : http://192.168.1.50:8765) — "
+                             "exécute les scripts Blender/Unreal/FFmpeg sur la machine "
+                             "de rendu après leur génération (voir worker_distant.py)")
+    parser.add_argument("--worker-jeton", type=str, default="",
+                        help="Jeton d'accès au worker (sinon : variable WORKER_JETON, "
+                             "affiché par le worker à son démarrage)")
     args = parser.parse_args(argv)
 
     if args.interactif and not sys.stdin.isatty():
         print("[Avertissement] : --interactif sans terminal interactif — "
               "les validations seront acceptées automatiquement.")
+
+    # ── 0. Connexion au worker distant (si demandé) ──────────────────────────
+    # Vérifiée AVANT de lancer le pipeline : inutile de consommer des appels
+    # LLM si la machine de rendu est injoignable.
+    executeur_distant = None
+    outils_worker: dict = {}
+    if args.worker:
+        jeton = args.worker_jeton.strip() or os.getenv("WORKER_JETON", "").strip()
+        if not jeton:
+            print("[Erreur] : --worker nécessite un jeton d'accès : option --worker-jeton")
+            print("           ou variable WORKER_JETON (le worker l'affiche à son démarrage).")
+            sys.exit(1)
+        client = ClientWorker(args.worker.strip(), jeton)
+        try:
+            sante = client.sante()
+        except ErreurWorker as e:
+            print(f"[Erreur] : {e}")
+            print("           Sur la machine de rendu : python3 worker_distant.py "
+                  "--hote 0.0.0.0")
+            sys.exit(1)
+        outils_worker = sante.get("outils", {})
+        executeur_distant = ExecuteurDistant(client, os.path.join(OUTPUT_DIR, "rendus"))
+        disponibles = [o for o, ok in outils_worker.items() if ok]
+        print(f"[Système] : Worker connecté ({args.worker}) — outils disponibles : "
+              + (", ".join(disponibles) if disponibles else "aucun"))
 
     # ── 1. Initialisation de la mémoire commune ──────────────────────────────
     # L'état précédent n'est rechargé qu'en mode --reprendre : une nouvelle
@@ -357,7 +519,7 @@ def lancer_studio(argv=None):
     # ── 3. Exécution du pipeline par l'orchestrateur central ────────────────
     orchestrateur = Orchestrateur(
         state=state,
-        etapes=construire_pipeline(),
+        etapes=construire_pipeline(executeur_distant, outils_worker),
         dossier_agents=AGENTS_DIR,
         surcharge_modele=args.model.strip() or None,
         reprendre=args.reprendre,

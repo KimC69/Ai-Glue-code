@@ -76,6 +76,9 @@ python main.py --reprendre
 
 # Mode Human-in-the-loop : valider, réviser ou arrêter à chaque étape créative
 python main.py --interactif
+
+# Exécuter Blender / Unreal / FFmpeg sur une machine de rendu distante
+python main.py --reprendre --worker http://192.168.1.50:8765 --worker-jeton JETON
 ```
 
 En cas d'échec d'une étape critique (Agents 01 à 05), l'état partiel est
@@ -104,6 +107,60 @@ précédentes) et une révision qui échoue ne casse rien : le résultat précé
 reste en vigueur. Sans terminal interactif (pipe, CI), les validations sont
 acceptées automatiquement.
 
+### Exécution distante sur un worker (`--worker`)
+
+Le studio génère les scripts, mais la machine qui les exécute (Blender,
+Unreal Engine, FFmpeg) est rarement la même. Le worker fait le pont.
+
+**Sur la machine de rendu** — un seul fichier à copier, aucune dépendance :
+
+```bash
+python3 worker_distant.py --hote 0.0.0.0 --port 8765 --blender /chemin/vers/blender
+```
+
+Le worker affiche son jeton d'accès au démarrage (ou fixez-le vous-même :
+variable `WORKER_JETON` ou option `--jeton`).
+
+**Côté studio** :
+
+```bash
+# Production complète puis rendu distant dans la foulée
+python main.py --idea "..." --worker http://IP:8765 --worker-jeton JETON
+
+# Ou : produire d'abord, rendre ensuite (recommandé)
+python main.py --idea "..."
+python main.py --reprendre --worker http://IP:8765 --worker-jeton JETON
+```
+
+Le jeton peut aussi être placé dans `.env` (`WORKER_JETON=...`). La
+connexion au worker est vérifiée avant de lancer le pipeline : machine
+injoignable = arrêt immédiat, aucun appel LLM consommé.
+
+Trois étapes optionnelles s'ajoutent alors au pipeline, uniquement pour les
+outils que le worker déclare disponibles :
+
+| Étape | Script envoyé | Exécution sur le worker |
+|---|---|---|
+| Rendu Blender | `output/scene_*.py` | `blender --background --python ...` |
+| Setup Unreal | `output/setup_*.sh` | `bash ...` (nécessite UE5 installé sur le worker) |
+| Exports FFmpeg | `output/export_multi_format.sh` | `bash ...` — chaîné dans le dossier du rendu Blender pour y retrouver la vidéo master |
+
+Chaque travail s'exécute dans un dossier isolé sur le worker ; les journaux
+et les fichiers produits sont rapatriés en flux — sans limite de taille,
+même pour des vidéos de plusieurs Go — dans `agents/output/rendus/<outil>/`.
+Un rendu qui échoue n'invalide jamais la production : le journal complet est
+rapatrié pour diagnostic, et `--reprendre --worker ...` ne relance que les
+rendus manquants.
+
+Sécurité : jeton obligatoire (en-tête `X-Jeton`), lanceurs limités aux trois
+outils du studio, un seul travail à la fois, écoute locale par défaut
+(`127.0.0.1`). À bien comprendre avant d'exposer le worker : sa fonction est
+d'exécuter les scripts qu'on lui envoie — posséder le jeton équivaut donc à
+pouvoir exécuter du code sur la machine de rendu. Traitez le jeton comme un
+mot de passe SSH (secret, jamais commité, régénéré au moindre doute) et
+n'exposez le worker (`--hote 0.0.0.0`) que sur un réseau de confiance,
+derrière un pare-feu ou un tunnel SSH.
+
 ## Modèles disponibles
 
 | Modèle | Coût | Qualité | Recommandé pour |
@@ -126,6 +183,8 @@ acceptées automatiquement.
 | `06_superviseur_post_production.py` | Agent 06 — classe `SuperviseurPostProduction` : audit de conformité, déclenche GIMP/montage **seulement si nécessaire** |
 | `07_exporteur_multi_format.py` | Agent 07 — classe `ExporteurMultiFormat` : déclinaison multi-format (TV, téléphone, réseaux sociaux) via FFmpeg |
 | `utils_headless.py` | Génère les commandes headless (Blender, Unreal, GIMP, montage, export FFmpeg) prêtes à copier-coller |
+| `worker_distant.py` | Serveur d'exécution distant (stdlib pur, fichier autonome) — à lancer sur la machine de rendu ; API HTTP protégée par jeton |
+| `client_worker.py` | Client du worker + `ExecuteurDistant` branché dans le pipeline (étapes de rendu distantes, rapatriement journaux/fichiers) |
 | `orchestrateur.py` | Moteur d'exécution central — `Etape` (description déclarative) + `Orchestrateur` (retry, validation des sorties, reprise `--reprendre`, bilan) |
 | `main.py` | Point d'entrée CLI — définit le pipeline déclaratif (7 `Etape`) et délègue l'exécution à l'`Orchestrateur` |
 
@@ -154,7 +213,10 @@ objet `Etape` (agent, entrées, sorties, criticité, tentatives) et le moteur
 - **Human-in-the-loop** : `--interactif` insère des arrêts contrôlés après
   chaque étape créative (valider / réviser avec directives / arrêter) ;
 - **Bilan** : un récapitulatif final liste les étapes réussies / ignorées /
-  échouées avec leur durée et le nombre de révisions humaines.
+  échouées avec leur durée et le nombre de révisions humaines ;
+- **Étapes non-LLM** : le champ `fabrique` d'une `Etape` injecte un objet
+  déjà construit (ex : l'`ExecuteurDistant` des étapes de rendu) au lieu de
+  charger un module d'agent.
 
 Pour ajouter un agent au pipeline : créer le fichier de l'agent (hériter de
 `BaseAgent`), puis ajouter une `Etape` dans `construire_pipeline()` de

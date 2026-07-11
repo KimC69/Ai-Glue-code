@@ -80,6 +80,10 @@ class Etape:
         purger           : clés d'état à réinitialiser si l'étape échoue
                            définitivement (évite d'afficher des données
                            obsolètes d'une production précédente)
+        fabrique         : optionnel — fonction sans argument retournant un
+                           « agent » déjà construit, au lieu de charger
+                           fichier/classe (étapes non-LLM : exécution
+                           distante, outils locaux...)
     """
     numero: int
     nom: str
@@ -97,6 +101,7 @@ class Etape:
     point_validation: bool = False
     champ_feedback: str = ""
     purger: tuple = ()
+    fabrique: Optional[Callable[[], Any]] = None
 
 
 class Orchestrateur:
@@ -146,7 +151,9 @@ class Orchestrateur:
         return all(self.state.get(cle, "") != "" for cle in etape.cles_sortie)
 
     def _instancier(self, etape: Etape):
-        """Charge le module de l'agent et instancie sa classe."""
+        """Construit l'« agent » : via fabrique si fournie, sinon module + classe."""
+        if etape.fabrique is not None:
+            return etape.fabrique()
         filepath = os.path.join(self.dossier_agents, etape.fichier)
         module = charger_module(filepath)
         classe = getattr(module, etape.classe)

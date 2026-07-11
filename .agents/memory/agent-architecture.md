@@ -37,6 +37,19 @@ Le pipeline est décrit comme des données (`Etape` : agent, entrées, sorties, 
 - `state.load()` uniquement sous `--reprendre` : sans lui, production vierge qui écrase l'ancien fichier — c'est ce qui empêche tout mélange inter-productions lors des skips de reprise.
 - Une révision HITL échouée déclenche un rollback complet (snapshot `to_dict()` avant le tour) ; les callbacks `enregistrer` doivent écrire un jeu de clés stable pour que le rollback soit exhaustif.
 
+## Worker d'exécution distant (--worker)
+
+Les rendus lourds (Blender, Unreal, FFmpeg) s'exécutent sur une autre machine via un couple client/serveur HTTP en stdlib pur (pas SSH) : `worker_distant.py` (autonome, copiable seul) + `client_worker.py`. Auth par jeton `X-Jeton` (hmac.compare_digest), lanceurs whitelistés (blender --background --python / bash pour les .sh), un seul travail à la fois, chaînage `poursuivre` (un travail s'exécute dans le dossier d'un travail terminé — l'export FFmpeg y retrouve la vidéo du rendu Blender).
+
+**Why:** HTTP stdlib = zéro dépendance des deux côtés et testable dans cet environnement (SSH ne l'était pas). Le modèle de confiance est assumé : le worker exécute des scripts arbitraires par fonction, donc **le jeton équivaut à un accès shell** — la doc ne doit jamais prétendre que la liste blanche empêche l'exécution de code arbitraire (erreur relevée en revue). Les vidéos rendues pèsent des Go : tout transfert (journal, fichiers) doit être en flux (morceaux 64 Kio, fichier `.partiel` renommé à la fin), jamais un `read()` complet en mémoire (2e erreur relevée en revue).
+
+**How to apply:**
+- Étape non-LLM dans le pipeline = `Etape.fabrique` (callable retournant l'« agent » pré-construit, court-circuite importlib).
+- Les étapes distantes (8–10, `critique=False, essais=1`) ne sont ajoutées que pour les outils déclarés par `GET /sante` ; connexion vérifiée fail-fast AVANT tout appel LLM.
+- Clés d'état `rendu_<outil>_{statut,travail_id,journal,fichiers}` ; seule `_statut` est `cles_sortie`, les quatre vont dans `purger`.
+- Journaux + fichiers rapatriés dans `output/rendus/<outil>/` MÊME en cas d'échec (diagnostic), l'exception ErreurWorker est levée après.
+- Flux recommandé : produire en local puis `--reprendre --worker URL` (ne relance que les rendus manquants).
+
 ## Human-in-the-loop (--interactif)
 
 Les étapes créatives (01–05) portent `point_validation=True` + `champ_feedback` : après exécution réussie, l'utilisateur valide, demande une révision, ou arrête proprement (`ArretUtilisateur` → exit 0, reprise via `--reprendre`). Les directives de révision sont réinjectées en APPEND dans le kwarg d'entrée désigné par `champ_feedback` — aucun agent ni prompt n'a été modifié.
