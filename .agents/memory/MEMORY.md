@@ -1,1 +1,2 @@
 - [Architecture des agents](agent-architecture.md) — BaseAgent + pipeline déclaratif (retry, reprise, HITL) ; worker distant HTTP stdlib : jeton = accès shell, transferts en flux, Etape.fabrique non-LLM.
+- [Feuille de route](feuille-de-route.md) — 10 étapes validées : 1–4 faites (robustesse, orchestrateur, HITL, worker distant) ; 5=BDD+logs, puis sécurité, API, web, Android, desktop. L'utilisateur annonce chaque étape.
