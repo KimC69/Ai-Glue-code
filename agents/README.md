@@ -185,7 +185,7 @@ continue sans traces.
 
 ## Comptes et sécurité (authentification)
 
-Fondation d'authentification — la brique qui permettra à l'API (à venir) puis
+Fondation d'authentification — la brique qui permet à l'API (voir plus bas) puis
 aux interfaces web/Android de savoir **qui** a le droit de commander le studio.
 Tout est en bibliothèque standard (aucune dépendance) et stocké dans une base
 dédiée `output/securite.db`, séparée de l'historique créatif.
@@ -210,12 +210,61 @@ python main.py --supprimer-utilisateur alice
 
 > Les mots de passe sont toujours saisis au clavier (masqués), jamais passés en
 > argument (sinon ils resteraient dans l'historique du shell). Ces commandes
-> s'exécutent puis quittent, sans lancer de production. À ce stade la CLI locale
-> n'exige pas encore de connexion — c'est l'API qui activera ces contrôles.
+> s'exécutent puis quittent, sans lancer de production. La CLI locale n'exige pas
+> de connexion ; ce sont **l'API et les interfaces** qui activent ces contrôles.
 >
 > Principe : le module **échoue fermé** — toute vérification qui ne peut pas
 > aboutir (base indisponible, signature invalide, jeton expiré ou révoqué)
 > refuse l'accès. On ne laisse jamais un doute autoriser quelqu'un.
+
+## API HTTP (`api_serveur.py`)
+
+L'API met en service l'authentification ci-dessus : elle expose le studio
+par-dessus HTTP pour les futures interfaces (web, Android, bureau). Tout est en
+bibliothèque standard (aucune dépendance), comme le worker et le journal.
+
+```bash
+# Prérequis : au moins un compte (voir ci-dessus) et le secret SESSION_SECRET.
+python api_serveur.py --hote 0.0.0.0 --port 8000
+```
+
+| Méthode & route | Permission | Rôle |
+|---|---|---|
+| `GET /sante` | publique | Vérifier que l'API répond |
+| `POST /connexion` | publique | `{nom, mot_de_passe}` → `{jeton, role, expire_dans_s}` |
+| `POST /deconnexion` | jeton valide | Révoque le jeton présenté |
+| `GET /productions` | `consulter` | Historique des productions |
+| `GET /productions/<id>` | `consulter` | Détail : étapes + événements |
+| `POST /productions` | `lancer_production` | `{idee, modele?}` → `202 {id}` |
+
+Toutes les routes (sauf `/sante` et `/connexion`) exigent l'en-tête
+`Authorization: Bearer <jeton>`.
+
+```bash
+# 1) Se connecter et récupérer un jeton
+JETON=$(curl -s -X POST http://localhost:8000/connexion \
+        -d '{"nom":"alice","mot_de_passe":"..."}' | python -c 'import sys,json;print(json.load(sys.stdin)["jeton"])')
+
+# 2) Lancer une production (renvoie l'identifiant immédiatement)
+curl -X POST http://localhost:8000/productions \
+     -H "Authorization: Bearer $JETON" \
+     -d '{"idee":"Un détective robot dans une ville néon"}'
+
+# 3) Suivre l'avancement
+curl -H "Authorization: Bearer $JETON" http://localhost:8000/productions/<id>
+```
+
+> **Lancement asynchrone.** Produire un film dure plusieurs minutes ; l'API ne
+> bloque pas. Elle génère l'identifiant, démarre `main.py --production-id <id>`
+> **en arrière-plan** et répond aussitôt (`202`). Le client suit ensuite via
+> `GET /productions/<id>`, qui lit le journal alimenté par le sous-processus. La
+> sortie du lancement est journalisée dans `output/lancements_api/<id>.log`.
+>
+> **Jamais de 500 pour un problème de sécurité** : jeton absent/invalide → `401`,
+> rôle insuffisant → `403`. Toute `ErreurSecurite` est convertie en réponse
+> propre. L'API refuse de démarrer si `SESSION_SECRET` est absent (échoue fermé).
+> Note : le sous-processus de production a besoin des dépendances du pipeline
+> (langchain…) installées ; l'API et l'authentification, elles, n'en ont pas.
 
 ## Modèles disponibles
 
@@ -244,6 +293,7 @@ python main.py --supprimer-utilisateur alice
 | `orchestrateur.py` | Moteur d'exécution central — `Etape` (description déclarative) + `Orchestrateur` (retry, validation des sorties, reprise `--reprendre`, bilan, notification du journal) |
 | `journal_production.py` | Journal de production (stdlib pur) — base SQLite `output/studio.db` (historique interrogeable) + logs structurés JSONL `output/journaux/<id>.jsonl` ; mode dégradé si l'écriture échoue |
 | `securite.py` | Fondation d'authentification (stdlib pur) — comptes + mots de passe hachés (pbkdf2), rôles/permissions, jetons de session signés (base `output/securite.db`) ; échoue fermé |
+| `api_serveur.py` | API HTTP (stdlib pur) — connexion, historique et lancement de productions, protégés par les jetons de `securite.py` ; lancement asynchrone via sous-processus `main.py --production-id` ; échoue fermé (jamais de 500 pour un refus) |
 | `main.py` | Point d'entrée CLI — définit le pipeline déclaratif (7 `Etape`), crée le journal et délègue l'exécution à l'`Orchestrateur` |
 
 Chaque agent expose une classe avec une méthode métier dédiée (`generer_vision()`,

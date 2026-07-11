@@ -15,7 +15,7 @@ Issue de l'audit complet demandé par l'utilisateur. **Règle de pilotage : c'es
 4. ✅ Worker distant — exécution de Blender / Unreal / FFmpeg sur une autre machine (HTTP stdlib + jeton), rapatriement des résultats.
 5. ✅ Base de données et logs structurés — SQLite `output/studio.db` + JSONL par production ; `--historique` ; objet nul + mode dégradé (voir agent-architecture.md).
 6. ✅ Authentification et sécurité — module `securite.py` : comptes (pbkdf2), rôles admin/operateur/observateur, jetons de session signés (SESSION_SECRET) ; échoue fermé ; base `output/securite.db` (voir agent-architecture.md). N'active pas encore de contrôle sur la CLI (ce sera l'API).
-7. ⬜ API backend.
+7. ✅ API backend — `api_serveur.py` (HTTP stdlib pur) : met en service l'auth de l'étape 6, lancement de production asynchrone, échoue fermé (jamais de 500 pour un refus). Décisions et invariants dans agent-architecture.md.
 8. ⬜ Interface web.
 9. ⬜ Application Android — télécommande + tableau de bord : chat avec les agents, envoi d'instructions, suivi des tâches, notifications, rapports, autorisation d'actions.
 10. ⬜ Application desktop (Windows/Linux) — interface complète : intervention à tout moment, suggestions, modification d'objectifs, relance de tâches, raisonnement de l'orchestrateur visible, journaux, ajout/suppression d'agents, gestion de la mémoire, performances.

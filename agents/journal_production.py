@@ -103,8 +103,16 @@ class JournalProduction:
     def _init_bdd(self) -> None:
         try:
             os.makedirs(os.path.dirname(self.jsonl_path), exist_ok=True)
-            self._connexion = sqlite3.connect(self.bdd_path, check_same_thread=False)
+            self._connexion = sqlite3.connect(
+                self.bdd_path, check_same_thread=False, timeout=5.0)
             self._connexion.row_factory = sqlite3.Row
+            # Accès concurrent : la base est partagée entre plusieurs processus
+            # (l'API lit pendant que les sous-processus de production écrivent).
+            # WAL autorise lecteurs et écrivain simultanés sans se bloquer ;
+            # busy_timeout fait patienter en cas de contention ponctuelle au
+            # lieu d'échouer aussitôt.
+            self._connexion.execute("PRAGMA journal_mode=WAL")
+            self._connexion.execute("PRAGMA busy_timeout=5000")
             self._connexion.executescript(SCHEMA)
             self._connexion.commit()
         except (sqlite3.Error, OSError) as e:
@@ -122,6 +130,15 @@ class JournalProduction:
                 curseur = self._connexion.execute(sql, params)
                 self._connexion.commit()
                 return curseur
+        except sqlite3.OperationalError as e:
+            # Verrou transitoire (contention multi-processus, malgré WAL et
+            # busy_timeout) : on saute CETTE opération mais on NE dégrade PAS
+            # définitivement — sinon une seule contention rendrait l'API aveugle
+            # (listes vides / 404) durablement. La prochaine requête réessaiera.
+            if "locked" in str(e).lower() or "busy" in str(e).lower():
+                return None
+            self._passer_en_degrade(e)
+            return None
         except sqlite3.Error as e:
             self._passer_en_degrade(e)
             return None

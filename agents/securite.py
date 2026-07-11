@@ -125,8 +125,15 @@ class Securite:
     def _init_bdd(self) -> None:
         try:
             os.makedirs(self.dossier, exist_ok=True)
-            self._connexion = sqlite3.connect(self.bdd_path, check_same_thread=False)
+            self._connexion = sqlite3.connect(
+                self.bdd_path, check_same_thread=False, timeout=5.0)
             self._connexion.row_factory = sqlite3.Row
+            # Accès concurrent (API multi-requêtes + gestion des comptes en CLI) :
+            # WAL + busy_timeout évitent qu'une contention ponctuelle ne fasse
+            # échouer une vérification de jeton (qui, en échouant fermé, se
+            # traduirait par un 401 injustifié).
+            self._connexion.execute("PRAGMA journal_mode=WAL")
+            self._connexion.execute("PRAGMA busy_timeout=5000")
             self._connexion.executescript(SCHEMA)
             self._connexion.commit()
         except (sqlite3.Error, OSError) as e:

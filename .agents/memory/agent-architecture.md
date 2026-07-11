@@ -74,6 +74,24 @@ Fondation d'auth stdlib pur, base dédiée séparée du journal, pour les future
 - Itérations pbkdf2 stockées PAR utilisateur = on peut durcir plus tard sans invalider les comptes existants.
 - **Décision de périmètre :** la CLI locale n'exige volontairement PAS encore de connexion (ne pas verrouiller l'utilisateur hors de son propre outil) ; l'activation des contrôles est reportée à l'API (étape 7).
 
+## API HTTP (api_serveur.py) — décisions durables
+
+API HTTP stdlib pur qui met en service l'auth de l'étape 6. Trois invariants qui doivent survivre à toute évolution :
+
+- **Aucun refus de sécurité ne doit produire une 500.** Jeton absent/invalide/expiré/révoqué → 401 ; rôle insuffisant → 403. Toute `ErreurSecurite` reste confinée dans le handler. Un filet anti-500 enveloppe le routage pour les cas de bord (en-tête malformé, client coupé). **Why:** le « échoue fermé » n'a de valeur que si le serveur ne tombe pas — une 500 non contrôlée = fuite d'info + DoS potentiel.
+- **L'API refuse de démarrer sans clé de signature (`SESSION_SECRET`).** Une porte d'auth incapable de vérifier un jeton ne doit pas être exposée.
+- **Lancement asynchrone, jamais bloquant.** Produire dure des minutes : l'API génère l'id, lance le pipeline en sous-processus détaché et répond aussitôt ; le client suit via lecture du journal. **Why:** un handler HTTP qui attendrait la fin d'une production monopoliserait un thread des minutes et expirerait côté client.
+
+**How to apply:**
+- Nouvelle route protégée = appeler le contrôle de permission en premier et retourner immédiatement s'il refuse ; ne jamais laisser une `ErreurSecurite` s'échapper d'un handler.
+- Nouveau droit = éditer `PERMISSIONS` dans securite.py (source unique), pas l'API.
+- Testable sans dépendance : construire le serveur sur port 0, injecter la clé de signature à `Securite`, et remplacer `main.py` par un stub côté `config.main_script` (le vrai pipeline exige langchain, l'API non).
+- L'API n'ÉCRIT jamais dans `studio.db` (lecture d'historique seule) ; les écritures viennent des sous-processus → voir la note SQLite concurrent ci-dessous.
+
+## Concurrence SQLite (bases partagées entre processus)
+
+`studio.db` (et `securite.db`) sont désormais lus par l'API pendant que des sous-processus écrivent. Deux garde-fous à conserver sur toute connexion partagée : **WAL** (lecteurs + un écrivain simultanés) et **busy_timeout** (attendre une contention au lieu d'échouer). Surtout : dans `journal_production._executer`, un verrou transitoire (`database is locked/busy`) NE doit PAS faire basculer le journal en mode dégradé permanent — sinon une seule contention rend l'API aveugle (listes vides / 404) durablement ; on saute l'opération et la suivante réessaie. **Why:** le mode dégradé est conçu pour les pannes vraies (disque, base corrompue), pas pour la contention normale du multi-processus.
+
 ## Human-in-the-loop (--interactif)
 
 Les étapes créatives (01–05) portent `point_validation=True` + `champ_feedback` : après exécution réussie, l'utilisateur valide, demande une révision, ou arrête proprement (`ArretUtilisateur` → exit 0, reprise via `--reprendre`). Les directives de révision sont réinjectées en APPEND dans le kwarg d'entrée désigné par `champ_feedback` — aucun agent ni prompt n'a été modifié.

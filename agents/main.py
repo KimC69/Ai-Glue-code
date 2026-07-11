@@ -33,6 +33,7 @@ Usage :
 import argparse
 import getpass
 import os
+import re
 import sys
 import uuid
 
@@ -589,6 +590,11 @@ def lancer_studio(argv=None):
     parser.add_argument("--historique", action="store_true",
                         help="Affiche l'historique des productions (base output/studio.db) "
                              "puis quitte, sans rien lancer")
+    parser.add_argument("--production-id", type=str, default="",
+                        help="Impose l'identifiant de la production (12 caractères "
+                             "hexadécimaux). Utilisé par l'API (étape 7) : elle génère "
+                             "l'identifiant, le renvoie au client, puis lance le pipeline "
+                             "avec cette option pour que le suivi retrouve la production")
 
     # ── Gestion des comptes (authentification, étape 6) ──────────────────────
     # Ces commandes s'exécutent puis quittent, sans lancer de production. Les
@@ -626,6 +632,18 @@ def lancer_studio(argv=None):
     # ── Commandes de gestion des comptes : s'exécutent puis quittent ─────────
     if _gerer_securite(args):
         return
+
+    # ── Validation de --production-id (imposé par l'API) ─────────────────────
+    if args.production_id:
+        if args.reprendre:
+            print("[Erreur] : --production-id et --reprendre sont incompatibles.")
+            print("           --reprendre réutilise l'identifiant de la production en")
+            print("           cours ; --production-id en impose un nouveau.")
+            sys.exit(1)
+        if not re.fullmatch(r"[0-9a-f]{12}", args.production_id):
+            print("[Erreur] : --production-id doit comporter 12 caractères "
+                  "hexadécimaux (0-9, a-f).")
+            sys.exit(1)
 
     if args.interactif and not sys.stdin.isatty():
         print("[Avertissement] : --interactif sans terminal interactif — "
@@ -704,7 +722,12 @@ def lancer_studio(argv=None):
     # étapes s'ajoutent à l'historique de la production d'origine au lieu d'en
     # créer une nouvelle.
     production_id = str(state.get("production_id", "")).strip()
-    if not production_id:
+    if args.production_id:
+        # Identifiant imposé par l'appelant (l'API le génère et le renvoie au
+        # client AVANT de lancer le pipeline, pour que le suivi le retrouve).
+        production_id = args.production_id
+        state.update("production_id", production_id)
+    elif not production_id:
         production_id = uuid.uuid4().hex[:12]
         state.update("production_id", production_id)
     journal = JournalProduction(production_id=production_id)
