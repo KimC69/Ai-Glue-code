@@ -54,6 +54,24 @@ from journal_production import JournalProduction
 VERSION = "1.0"
 DOSSIER_DEFAUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 MAIN_DEFAUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "main.py")
+DOSSIER_PWA_DEFAUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pwa")
+
+# Interface mobile (PWA, étape 9) servie EN STATIQUE par l'API. Liste BLANCHE
+# explicite « route → (fichier relatif, type MIME) » : on ne construit jamais un
+# chemin de fichier à partir de l'URL, donc aucune traversée de répertoire
+# (« /../secret ») n'est possible. Ces ressources sont PUBLIQUES (la page elle-
+# même) ; les appels API qu'elle déclenche restent protégés par le jeton.
+FICHIERS_PWA = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/index.html": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/style.css": ("style.css", "text/css; charset=utf-8"),
+    "/manifest.webmanifest": ("manifest.webmanifest",
+                              "application/manifest+json; charset=utf-8"),
+    "/sw.js": ("sw.js", "text/javascript; charset=utf-8"),
+    "/icons/icon-192.png": ("icons/icon-192.png", "image/png"),
+    "/icons/icon-512.png": ("icons/icon-512.png", "image/png"),
+}
 
 # Un corps de requête JSON (connexion, lancement) est minuscule : on plafonne
 # pour ne pas lire un flux arbitraire en mémoire.
@@ -73,6 +91,7 @@ class ConfigAPI:
     dossier: str = DOSSIER_DEFAUT          # dossier output/ (bases + logs)
     python: str = ""                       # interpréteur pour le sous-processus
     main_script: str = MAIN_DEFAUT         # chemin de main.py
+    dossier_pwa: str = DOSSIER_PWA_DEFAUT  # dossier de l'app mobile (statique)
     duree_jeton_s: int = DUREE_JETON_DEFAUT
 
     def __post_init__(self):
@@ -173,6 +192,39 @@ class RequeteAPI(BaseHTTPRequestHandler):
             return None
         return corps
 
+    # ── Fichiers statiques de l'app mobile (PWA) ─────────────────────────────────
+
+    def _fichier(self, chemin_relatif: str, content_type: str) -> None:
+        """Sert un fichier de la PWA. `chemin_relatif` provient de la liste
+        blanche FICHIERS_PWA (jamais de l'URL brute) : pas de traversée possible."""
+        chemin = os.path.join(self.config.dossier_pwa, chemin_relatif)
+        try:
+            with open(chemin, "rb") as f:
+                corps = f.read()
+        except OSError:
+            # PWA non installée à côté de l'API (ou icône manquante) : 404 propre.
+            return self._erreur(404, "ressource introuvable")
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(corps)))
+        # Le service worker ne doit PAS être mis en cache par le navigateur,
+        # sinon une mise à jour de l'app ne serait jamais récupérée.
+        if chemin_relatif == "sw.js":
+            self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(corps)
+
+    def _servir_statique(self) -> bool:
+        """Sert une ressource de la PWA si l'URL en désigne une. Retourne True si
+        la requête a été traitée (fichier servi ou 404), False sinon — auquel cas
+        le routeur continue vers ses autres routes."""
+        chemin = self.path.split("?", 1)[0]
+        entree = FICHIERS_PWA.get(chemin)
+        if entree is None:
+            return False
+        self._fichier(*entree)
+        return True
+
     # ── Routage (avec filet de sécurité anti-500) ───────────────────────────────
 
     def _router(self, handler) -> None:
@@ -220,6 +272,10 @@ class RequeteAPI(BaseHTTPRequestHandler):
             if not details:
                 return self._erreur(404, "production inconnue")
             return self._json(200, details)
+
+        # Interface mobile (PWA) : fichiers statiques publics (/, /app.js, …).
+        if self._servir_statique():
+            return
 
         return self._erreur(404, "route inconnue")
 
@@ -397,6 +453,7 @@ def principal(argv=None) -> int:
     print("  🎬  API DU STUDIO IA")
     print("─" * 62)
     print(f"  Écoute      : http://{args.hote}:{port_effectif}")
+    print(f"  App mobile  : http://{args.hote}:{port_effectif}/  (PWA — étape 9)")
     print(f"  Comptes     : {nb_comptes}")
     print(f"  Jeton valide: {config.duree_jeton_s}s")
     print("  Routes      : GET /sante · POST /connexion · POST /deconnexion")

@@ -1,0 +1,20 @@
+# ── Secrets & configuration locale (NE JAMAIS committer) ─────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Données générées à l'exécution (bases, journaux, rendus, sorties) ─────────
+# output/ contient studio.db (historique) ET securite.db (mots de passe hachés,
+# comptes) + les journaux et les rendus. Rien de tout cela ne va sur GitHub.
+output/
+
+# Logs des lancements de l'API
+lancements_api/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/

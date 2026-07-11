@@ -1,0 +1,291 @@
+/*
+ * app.js — Logique de la régie mobile (PWA, étape 9).
+ *
+ * Équivalent JavaScript de client_api.py : parle à la MÊME API (api_serveur.py),
+ * servie sur la MÊME origine (donc chemins relatifs « /connexion », « /productions »…).
+ * Le jeton de session est conservé dans localStorage ; il est ajouté en en-tête
+ * « Authorization: Bearer <jeton> » sur chaque appel protégé. À la moindre
+ * réponse 401, on repasse automatiquement à l'écran de connexion.
+ *
+ * Vanilla JS, aucune dépendance : fidèle à la philosophie du projet.
+ */
+
+"use strict";
+
+// ── État local ───────────────────────────────────────────────────────────
+const CLE_JETON = "studio_jeton";
+const CLE_ROLE = "studio_role";
+const ROLES_LANCEMENT = ["admin", "operateur"]; // droit « lancer_production »
+
+let productionCourante = null; // id affiché dans la vue détail
+let minuteur = null;           // rafraîchissement automatique
+
+const $ = (sel) => document.querySelector(sel);
+
+function jeton() { return localStorage.getItem(CLE_JETON) || ""; }
+function role() { return localStorage.getItem(CLE_ROLE) || ""; }
+
+// ── Appels API ─────────────────────────────────────────────────────────────
+async function api(methode, chemin, corps) {
+  const entetes = { "Accept": "application/json" };
+  if (corps !== undefined) entetes["Content-Type"] = "application/json; charset=utf-8";
+  const j = jeton();
+  if (j) entetes["Authorization"] = "Bearer " + j;
+
+  let rep;
+  try {
+    rep = await fetch(chemin, {
+      method: methode,
+      headers: entetes,
+      body: corps !== undefined ? JSON.stringify(corps) : undefined,
+    });
+  } catch (e) {
+    throw { code: 0, message: "Serveur injoignable. Vérifiez la connexion." };
+  }
+
+  let objet = {};
+  try { objet = await rep.json(); } catch (e) { /* corps vide ou non-JSON */ }
+
+  if (!rep.ok) {
+    // Jeton expiré/révoqué : on déconnecte proprement plutôt que d'insister.
+    if (rep.status === 401 && jeton()) { deconnexionLocale(); afficherVue("connexion"); }
+    throw { code: rep.status, message: (objet && objet.erreur) || ("Erreur " + rep.status) };
+  }
+  return objet;
+}
+
+// ── Navigation entre vues ────────────────────────────────────────────────
+function afficherVue(nom) {
+  for (const v of ["connexion", "tableau", "detail"]) {
+    $("#vue-" + v).hidden = (v !== nom);
+  }
+  clearInterval(minuteur);
+  if (nom === "tableau") minuteur = setInterval(rafraichirListe, 5000);
+  if (nom === "detail") minuteur = setInterval(() => afficherDetail(productionCourante, true), 5000);
+}
+
+// ── Connexion / déconnexion ────────────────────────────────────────────────
+async function seConnecter(evt) {
+  evt.preventDefault();
+  const btn = $("#btn-connexion");
+  const err = $("#erreur-connexion");
+  err.hidden = true;
+  btn.disabled = true;
+  btn.textContent = "Connexion…";
+  try {
+    const rep = await api("POST", "/connexion", {
+      nom: $("#ch-nom").value.trim(),
+      mot_de_passe: $("#ch-mdp").value,
+    });
+    localStorage.setItem(CLE_JETON, rep.jeton || "");
+    localStorage.setItem(CLE_ROLE, rep.role || "");
+    $("#ch-mdp").value = "";
+    entrerTableau();
+  } catch (e) {
+    err.textContent = e.message;
+    err.hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Se connecter";
+  }
+}
+
+function deconnexionLocale() {
+  localStorage.removeItem(CLE_JETON);
+  localStorage.removeItem(CLE_ROLE);
+}
+
+async function seDeconnecter() {
+  try { await api("POST", "/deconnexion"); } catch (e) { /* on déconnecte quand même */ }
+  deconnexionLocale();
+  afficherVue("connexion");
+}
+
+// ── Tableau de bord ────────────────────────────────────────────────────────
+function entrerTableau() {
+  $("#badge-role").textContent = role();
+  $("#btn-nouvelle").hidden = !ROLES_LANCEMENT.includes(role());
+  afficherVue("tableau");
+  rafraichirListe();
+}
+
+async function rafraichirListe() {
+  try {
+    const rep = await api("GET", "/productions");
+    const liste = rep.productions || [];
+    const conteneur = $("#liste-productions");
+    $("#liste-vide").hidden = liste.length > 0;
+    conteneur.innerHTML = "";
+    for (const p of liste) conteneur.appendChild(carteProduction(p));
+  } catch (e) {
+    if (e.code !== 401) toast(e.message, "erreur");
+  }
+}
+
+function carteProduction(p) {
+  const el = document.createElement("div");
+  el.className = "carte-prod";
+  const reussies = p.etapes_reussies != null ? p.etapes_reussies : 0;
+  el.innerHTML = `
+    <div class="ligne-haut">
+      <span class="idee"></span>
+      <span class="badge ${classeStatut(p.statut)}">${libelleStatut(p.statut)}</span>
+    </div>
+    <div class="meta">
+      <span>✓ ${reussies} étape(s)</span>
+      <span>${formaterDate(p.demarree_le)}</span>
+    </div>`;
+  el.querySelector(".idee").textContent = p.idee || "(sans titre)";
+  el.addEventListener("click", () => afficherDetail(p.id));
+  return el;
+}
+
+// ── Détail d'une production ─────────────────────────────────────────────────
+async function afficherDetail(id, silencieux) {
+  productionCourante = id;
+  if (!silencieux) afficherVue("detail");
+  try {
+    const d = await api("GET", "/productions/" + id);
+    const p = d.production || {};
+    const etapes = d.etapes || [];
+    const evenements = d.evenements || [];
+
+    $("#contenu-detail").innerHTML = `
+      <div class="bloc">
+        <div class="detail-idee"></div>
+        <div class="detail-meta">
+          <span class="badge ${classeStatut(p.statut)}">${libelleStatut(p.statut)}</span>
+          <span>Modèle : ${echapper(p.modele || "défaut")}</span>
+          <span>Démarrée : ${formaterDate(p.demarree_le)}</span>
+          ${p.terminee_le ? `<span>Terminée : ${formaterDate(p.terminee_le)}</span>` : ""}
+        </div>
+      </div>
+      <div class="bloc">
+        <h3>Étapes (${etapes.length})</h3>
+        <div id="detail-etapes"></div>
+      </div>
+      <div class="bloc">
+        <h3>Journal / raisonnement (${evenements.length})</h3>
+        <div id="detail-evts"></div>
+      </div>`;
+    $("#contenu-detail .detail-idee").textContent = p.idee || "(sans titre)";
+
+    const boiteEtapes = $("#detail-etapes");
+    if (etapes.length === 0) boiteEtapes.innerHTML = `<p class="etat-vide">Pas encore d'étape.</p>`;
+    for (const e of etapes) boiteEtapes.appendChild(ligneEtape(e));
+
+    const boiteEvts = $("#detail-evts");
+    if (evenements.length === 0) boiteEvts.innerHTML = `<p class="etat-vide">Aucun événement.</p>`;
+    for (const ev of evenements.slice().reverse()) boiteEvts.appendChild(ligneEvenement(ev));
+  } catch (e) {
+    if (e.code !== 401) toast(e.message, "erreur");
+  }
+}
+
+function ligneEtape(e) {
+  const el = document.createElement("div");
+  el.className = "etape";
+  const duree = e.duree_s != null ? formaterDuree(e.duree_s) : "";
+  el.innerHTML = `
+    <span class="num">${e.numero != null ? e.numero : "•"}</span>
+    <span class="nom"></span>
+    <span class="badge ${classeStatut(e.statut)}">${libelleStatut(e.statut)}</span>
+    <span class="duree">${duree}</span>`;
+  el.querySelector(".nom").textContent = e.nom || "";
+  return el;
+}
+
+function ligneEvenement(ev) {
+  const el = document.createElement("div");
+  el.className = "evt" + (ev.niveau === "critique" ? " critique" : "");
+  el.innerHTML = `
+    <div class="evt-tete"><span>${echapper(ev.type || "")}</span><span>${formaterHeure(ev.horodatage)}</span></div>
+    <div class="evt-msg"></div>`;
+  el.querySelector(".evt-msg").textContent = ev.message || "";
+  return el;
+}
+
+// ── Nouvelle production (modale) ─────────────────────────────────────────────
+function ouvrirModale() { $("#modale").hidden = false; $("#ch-idee").focus(); }
+function fermerModale() { $("#modale").hidden = true; $("#form-production").reset(); }
+
+async function lancerProduction(evt) {
+  evt.preventDefault();
+  const idee = $("#ch-idee").value.trim();
+  if (!idee) return;
+  const modele = $("#ch-modele").value.trim();
+  try {
+    const corps = { idee };
+    if (modele) corps.modele = modele;
+    const rep = await api("POST", "/productions", corps);
+    fermerModale();
+    toast("Production lancée : " + (rep.id || ""), "succes");
+    rafraichirListe();
+  } catch (e) {
+    toast(e.message, "erreur");
+  }
+}
+
+// ── Utilitaires d'affichage ─────────────────────────────────────────────────
+function classeStatut(s) { return (s || "").toLowerCase().replace(/[^a-z_]/g, ""); }
+function libelleStatut(s) {
+  const m = { en_cours: "en cours", terminee: "terminée", echec: "échec",
+              arretee: "arrêtée", reussie: "réussie", echouee: "échouée",
+              ignoree: "ignorée" };
+  return m[(s || "").toLowerCase()] || (s || "—");
+}
+function formaterDuree(sec) {
+  if (sec == null) return "";
+  if (sec < 60) return sec.toFixed(1) + " s";
+  const m = Math.floor(sec / 60), r = Math.round(sec % 60);
+  return m + " min " + (r < 10 ? "0" : "") + r + " s";
+}
+function formaterDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+}
+function formaterHeure(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleTimeString("fr-FR", { timeStyle: "medium" });
+}
+function echapper(t) {
+  const div = document.createElement("div");
+  div.textContent = t == null ? "" : String(t);
+  return div.innerHTML;
+}
+function toast(message, type) {
+  const t = $("#toast");
+  t.textContent = message;
+  t.className = "toast" + (type ? " " + type : "");
+  t.hidden = false;
+  clearTimeout(t._minuteur);
+  t._minuteur = setTimeout(() => (t.hidden = true), 3200);
+}
+
+// ── Démarrage ────────────────────────────────────────────────────────────
+function init() {
+  $("#form-connexion").addEventListener("submit", seConnecter);
+  $("#btn-deconnexion").addEventListener("click", seDeconnecter);
+  $("#btn-rafraichir").addEventListener("click", rafraichirListe);
+  $("#btn-nouvelle").addEventListener("click", ouvrirModale);
+  $("#btn-annuler").addEventListener("click", fermerModale);
+  $("#form-production").addEventListener("submit", lancerProduction);
+  $("#btn-retour").addEventListener("click", entrerTableau);
+  $("#btn-rafraichir-detail").addEventListener("click", () => afficherDetail(productionCourante, true));
+  $("#modale").addEventListener("click", (e) => { if (e.target.id === "modale") fermerModale(); });
+
+  if (jeton()) entrerTableau();
+  else afficherVue("connexion");
+
+  // Le service worker ne s'enregistre qu'en contexte sécurisé (HTTPS ou
+  // localhost) : sur un simple http://IP:port depuis un téléphone, le
+  // navigateur le refuse — l'app fonctionne alors comme une page web normale
+  // (sans installation ni mode hors-ligne). Voir MANUEL.md.
+  if ("serviceWorker" in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+}
+
+document.addEventListener("DOMContentLoaded", init);

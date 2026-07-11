@@ -266,6 +266,46 @@ curl -H "Authorization: Bearer $JETON" http://localhost:8000/productions/<id>
 > Note : le sous-processus de production a besoin des dépendances du pipeline
 > (langchain…) installées ; l'API et l'authentification, elles, n'en ont pas.
 
+## Application mobile (PWA — étape 9)
+
+Une **télécommande mobile** (Progressive Web App) servie directement par l'API :
+aucun magasin d'applications, aucune dépendance. Elle permet, depuis un
+téléphone Android, de se connecter, lancer une production et suivre son
+avancement (étapes + journal de l'orchestrateur).
+
+```bash
+# Exposer l'API au réseau local (0.0.0.0), puis ouvrir sur le téléphone :
+python api_serveur.py --hote 0.0.0.0 --port 8000
+#   → http://<IP-du-PC>:8000/   (même réseau Wi-Fi)
+```
+
+Les fichiers de l'app vivent dans `agents/pwa/` (page unique + style + logique +
+service worker + icônes). L'API les sert en statique via une **liste blanche**
+de chemins — aucune traversée de répertoire possible.
+
+> **Installation sur l'écran d'accueil / mode hors-ligne** : ils nécessitent un
+> « contexte sécurisé » (HTTPS ou `localhost`). Sur un simple
+> `http://<IP>:8000`, l'app **fonctionne comme une page web normale** mais n'est
+> ni installable ni disponible hors-ligne. Pour l'installer réellement, placez
+> l'API derrière du HTTPS (reverse-proxy, ou un tunnel type `cloudflared` /
+> `ngrok`). Détails dans **MANUEL.md**.
+
+## Application de bureau (étape 10)
+
+Interface graphique pour **Windows et Linux** (`bureau.py`), écrite en
+**Tkinter** — inclus dans Python, donc rien à installer (sous Linux : paquet
+système `python3-tk`). Elle réutilise la brique commune `client_api.py`.
+
+```bash
+python bureau.py --url http://127.0.0.1:8000
+```
+
+Elle offre : connexion, tableau de bord des productions (rafraîchissement
+automatique), lancement d'une nouvelle production (si le rôle l'autorise), et
+un panneau de détail montrant les étapes ET le journal des événements de
+l'orchestrateur (son « raisonnement »). Voir **MANUEL.md** pour la liste
+complète et les limites (les fonctions qui exigeront de nouveaux points d'API).
+
 ## Modèles disponibles
 
 | Modèle | Coût | Qualité | Recommandé pour |
@@ -293,7 +333,10 @@ curl -H "Authorization: Bearer $JETON" http://localhost:8000/productions/<id>
 | `orchestrateur.py` | Moteur d'exécution central — `Etape` (description déclarative) + `Orchestrateur` (retry, validation des sorties, reprise `--reprendre`, bilan, notification du journal) |
 | `journal_production.py` | Journal de production (stdlib pur) — base SQLite `output/studio.db` (historique interrogeable) + logs structurés JSONL `output/journaux/<id>.jsonl` ; mode dégradé si l'écriture échoue |
 | `securite.py` | Fondation d'authentification (stdlib pur) — comptes + mots de passe hachés (pbkdf2), rôles/permissions, jetons de session signés (base `output/securite.db`) ; échoue fermé |
-| `api_serveur.py` | API HTTP (stdlib pur) — connexion, historique et lancement de productions, protégés par les jetons de `securite.py` ; lancement asynchrone via sous-processus `main.py --production-id` ; échoue fermé (jamais de 500 pour un refus) |
+| `api_serveur.py` | API HTTP (stdlib pur) — connexion, historique et lancement de productions, protégés par les jetons de `securite.py` ; lancement asynchrone via sous-processus `main.py --production-id` ; échoue fermé (jamais de 500 pour un refus) ; sert aussi la PWA en statique |
+| `client_api.py` | Client Python de l'API (stdlib pur, urllib) — brique **commune** aux interfaces (bureau, scripts) ; masque le jeton Bearer, l'encodage JSON et les codes d'erreur (`ErreurAPI`) |
+| `bureau.py` | Application de bureau Tkinter (étape 10) — connexion, tableau de bord, lancement et suivi détaillé ; s'appuie sur `client_api.py` |
+| `pwa/` | Application mobile PWA (étape 9) — `index.html`, `style.css`, `app.js`, `sw.js` (service worker), `manifest.webmanifest`, `icons/` ; servie en statique par l'API |
 | `main.py` | Point d'entrée CLI — définit le pipeline déclaratif (7 `Etape`), crée le journal et délègue l'exécution à l'`Orchestrateur` |
 
 Chaque agent expose une classe avec une méthode métier dédiée (`generer_vision()`,

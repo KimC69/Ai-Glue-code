@@ -16,9 +16,11 @@ Issue de l'audit complet demandé par l'utilisateur. **Règle de pilotage : c'es
 5. ✅ Base de données et logs structurés — SQLite `output/studio.db` + JSONL par production ; `--historique` ; objet nul + mode dégradé (voir agent-architecture.md).
 6. ✅ Authentification et sécurité — module `securite.py` : comptes (pbkdf2), rôles admin/operateur/observateur, jetons de session signés (SESSION_SECRET) ; échoue fermé ; base `output/securite.db` (voir agent-architecture.md). N'active pas encore de contrôle sur la CLI (ce sera l'API).
 7. ✅ API backend — `api_serveur.py` (HTTP stdlib pur) : met en service l'auth de l'étape 6, lancement de production asynchrone, échoue fermé (jamais de 500 pour un refus). Décisions et invariants dans agent-architecture.md.
-8. ⬜ Interface web.
-9. ⬜ Application Android — télécommande + tableau de bord : chat avec les agents, envoi d'instructions, suivi des tâches, notifications, rapports, autorisation d'actions.
-10. ⬜ Application desktop (Windows/Linux) — interface complète : intervention à tout moment, suggestions, modification d'objectifs, relance de tâches, raisonnement de l'orchestrateur visible, journaux, ajout/suppression d'agents, gestion de la mémoire, performances.
+8. ⏭️ Interface web — **abandonnée** (choix utilisateur) au profit de la PWA de l'étape 9.
+9. ✅ Application Android = **PWA** servie en statique par l'API (`agents/pwa/`) : connexion, tableau de bord, lancement, suivi étapes+événements. Voir agent-architecture.md (section interfaces).
+10. ✅ Application desktop (Windows/Linux) — `bureau.py` (Tkinter, stdlib) via la brique commune `client_api.py`. Voir agent-architecture.md (section interfaces).
+
+> Vision cible non encore couverte (interfaces limitées à ce que l'API expose) : pilotage/pause en cours de production, arrêt d'une production lancée, ajout/suppression d'agents, gestion mémoire/objectifs. → nécessitent de **nouveaux endpoints** avant d'apparaître dans PWA/bureau ; documenté « à venir », jamais stubbé.
 
 ## Vision cible (audit d'origine)
 

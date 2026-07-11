@@ -92,6 +92,20 @@ API HTTP stdlib pur qui met en service l'auth de l'étape 6. Trois invariants qu
 
 `studio.db` (et `securite.db`) sont désormais lus par l'API pendant que des sous-processus écrivent. Deux garde-fous à conserver sur toute connexion partagée : **WAL** (lecteurs + un écrivain simultanés) et **busy_timeout** (attendre une contention au lieu d'échouer). Surtout : dans `journal_production._executer`, un verrou transitoire (`database is locked/busy`) NE doit PAS faire basculer le journal en mode dégradé permanent — sinon une seule contention rend l'API aveugle (listes vides / 404) durablement ; on saute l'opération et la suivante réessaie. **Why:** le mode dégradé est conçu pour les pannes vraies (disque, base corrompue), pas pour la contention normale du multi-processus.
 
+## Interfaces PWA (étape 9) et bureau (étape 10)
+
+Décisions durables pour les deux interfaces clientes, toutes deux au-dessus de l'API (étape 7), en gardant la philosophie zéro-dépendance.
+
+- **Brique commune `client_api.py` (stdlib urllib)** : cœur client testable (jeton Bearer, JSON, `ErreurAPI(message,code)`). Le bureau l'utilise ; la PWA en fait l'équivalent en JS. Toute évolution de contrat API se répercute ici en premier.
+- **PWA servie EN STATIQUE par l'API via liste blanche** (`FICHIERS_PWA` route→(fichier,MIME) dans api_serveur.py) : jamais de chemin construit depuis l'URL → zéro traversée de répertoire. Servie même origine → fetch en chemins relatifs, pas de CORS. Ressources publiques, mais les appels API qu'elles déclenchent restent protégés par jeton. `sw.js` renvoyé avec `Cache-Control: no-cache`.
+- **Service worker seulement en contexte sécurisé** (`isSecureContext`) : sur `http://IP:port` (LAN), le navigateur refuse le SW → app utilisable mais NON installable / NON hors-ligne. **Caveat à toujours documenter, ce n'est pas un bug.** Le SW ne cache jamais les appels API (`/connexion`,`/deconnexion`,`/productions`,`/sante`,`/productions/*`).
+- **Bureau Tkinter, import Tk gardé (try/except)** : le module reste importable/testable sans écran ; les helpers d'affichage (`libelle_statut`,`formater_duree`,`resumer_production`) sont **purs** et testés séparément. Appels réseau dans un thread + `after` (Tk non thread-safe).
+- **Ne jamais stubber les fonctions « vision » non couvertes par l'API** (pilotage/pause/arrêt en cours, gestion agents/mémoire) : elles exigent de nouveaux endpoints → documentées « à venir ». Masquer les actions selon le rôle (ex. cacher « Nouvelle production » si observateur).
+
+**Why:** rester testable dans cet environnement (ni Tk ni langchain requis pour l'infra), et honnête sur les limites (pas d'illusion de fonctionnalité). La liste blanche + secure-context sont des invariants de sécurité, pas des détails.
+
+**How to apply:** nouvelle capacité d'interface = d'abord un endpoint dans api_serveur.py, puis une méthode dans `client_api.py` (+ équivalent JS dans `pwa/app.js`), puis l'UI. Nouveau fichier PWA = l'ajouter à `FICHIERS_PWA` (route+MIME) ET à la coquille de `sw.js`. Icônes régénérables sans dépendance via `pwa/icons/generer_icones.py` (encodeur PNG zlib+struct).
+
 ## Human-in-the-loop (--interactif)
 
 Les étapes créatives (01–05) portent `point_validation=True` + `champ_feedback` : après exécution réussie, l'utilisateur valide, demande une révision, ou arrête proprement (`ArretUtilisateur` → exit 0, reprise via `--reprendre`). Les directives de révision sont réinjectées en APPEND dans le kwarg d'entrée désigné par `champ_feedback` — aucun agent ni prompt n'a été modifié.
