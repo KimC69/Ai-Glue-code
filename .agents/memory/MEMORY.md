@@ -1,1 +1,1 @@
-- [Architecture des agents](agent-architecture.md) — Classe de base `BaseAgent` + gestion centralisée des erreurs dans l'orchestrateur.
+- [Architecture des agents](agent-architecture.md) — BaseAgent commun + pipeline déclaratif (Etape/Orchestrateur) : retry, validation des sorties, reprise ; agents sans sys.exit().

@@ -21,3 +21,14 @@ Aucune classe d'agent ne doit appeler `sys.exit()` : elle lève une exception cl
 - Dans l'orchestrateur, envelopper instanciation + exécution de l'agent dans un même `try/except`.
 - Pour les agents critiques (01–05), sauvegarder l'état partiel et arrêter proprement.
 - Pour les agents optionnels (06–07), logger l'erreur et continuer sans bloquer le pipeline.
+
+## Orchestrateur central déclaratif
+
+Le pipeline est décrit comme des données (`Etape` : agent, entrées, sorties, criticité, nb de tentatives) et exécuté par un moteur générique (`Orchestrateur`) qui gère retry, validation des clés de sortie dans l'état partagé, reprise (`--reprendre` saute les étapes dont les sorties existent déjà), et bilan final.
+
+**Why:** L'ancien `main.py` dupliquait 7 blocs quasi identiques (charge module → instancie → try/except → sauvegarde → affiche) ; toute évolution transversale (retry, reprise, timing) devait être copiée 7 fois. Le moteur est en stdlib pur (aucun import projet/LangChain) pour rester testable sans clé API ni pydantic installé.
+
+**How to apply:**
+- Nouvel agent dans le pipeline = ajouter une `Etape` dans `construire_pipeline()` (main.py), rien d'autre.
+- La validation « sortie remplie » compare à `""` (et non à la truthiness) car `False` et `0` sont des sorties valides (bools/scores de l'audit).
+- Les chemins des fichiers générés (`*_saved_path`) sont persistés dans l'état pour que le récap final et la reprise fonctionnent après un redémarrage.

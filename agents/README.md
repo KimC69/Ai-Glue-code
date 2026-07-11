@@ -70,7 +70,16 @@ python main.py --idea "Un détective robot enquête dans une ville néon sous la
 
 # Avec un modèle plus puissant
 python main.py --model gpt-4o --idea "Un moine shaolin découvre que son temple est une simulation"
+
+# Reprendre une production interrompue (saute les étapes déjà complétées)
+python main.py --reprendre
 ```
+
+En cas d'échec d'une étape critique (Agents 01 à 05), l'état partiel est
+sauvegardé automatiquement : corrigez le problème puis relancez avec
+`--reprendre` pour continuer là où la production s'était arrêtée. Chaque
+appel LLM est retenté une fois automatiquement avant de déclarer l'échec.
+Les Agents 06 et 07 sont optionnels : leur échec n'arrête jamais le pipeline.
 
 ## Modèles disponibles
 
@@ -94,14 +103,37 @@ python main.py --model gpt-4o --idea "Un moine shaolin découvre que son temple 
 | `06_superviseur_post_production.py` | Agent 06 — classe `SuperviseurPostProduction` : audit de conformité, déclenche GIMP/montage **seulement si nécessaire** |
 | `07_exporteur_multi_format.py` | Agent 07 — classe `ExporteurMultiFormat` : déclinaison multi-format (TV, téléphone, réseaux sociaux) via FFmpeg |
 | `utils_headless.py` | Génère les commandes headless (Blender, Unreal, GIMP, montage, export FFmpeg) prêtes à copier-coller |
-| `main.py` | Orchestrateur — `lancer_studio()` lie les 7 agents via `WorldState` |
+| `orchestrateur.py` | Moteur d'exécution central — `Etape` (description déclarative) + `Orchestrateur` (retry, validation des sorties, reprise `--reprendre`, bilan) |
+| `main.py` | Point d'entrée CLI — définit le pipeline déclaratif (7 `Etape`) et délègue l'exécution à l'`Orchestrateur` |
 
 Chaque agent expose une classe avec une méthode métier dédiée (`generer_vision()`,
 `construire_structure()`, `ecrire_scenario()`, `creer_scene_blender()`,
 `creer_setup_unreal()`, `analyser_conformite()`, `generer_exports()`). Les
-fichiers commencent par un chiffre pour l'ordre de lecture ; `main.py` les
-charge via `importlib.util` car Python n'autorise pas `import 01_...`
+fichiers commencent par un chiffre pour l'ordre de lecture ; l'orchestrateur
+les charge via `importlib.util` car Python n'autorise pas `import 01_...`
 directement.
+
+### Orchestrateur central
+
+Le pipeline n'est plus un script linéaire : chaque étape est décrite par un
+objet `Etape` (agent, entrées, sorties, criticité, tentatives) et le moteur
+`Orchestrateur` exécute la liste de façon générique :
+
+- **Retry** : chaque appel LLM est retenté (2 tentatives par défaut) ;
+- **Validation** : après chaque étape, les clés de sortie attendues sont
+  vérifiées dans `WorldState` — une étape qui ne produit pas ses sorties est
+  déclarée en échec ;
+- **Criticité** : un échec d'étape critique (01–05) sauvegarde l'état partiel
+  et arrête proprement ; un échec d'étape optionnelle (06–07) est journalisé
+  et le pipeline continue ;
+- **Reprise** : `--reprendre` saute les étapes dont les sorties sont déjà
+  dans `world_state.json` ;
+- **Bilan** : un récapitulatif final liste les étapes réussies / ignorées /
+  échouées avec leur durée.
+
+Pour ajouter un agent au pipeline : créer le fichier de l'agent (hériter de
+`BaseAgent`), puis ajouter une `Etape` dans `construire_pipeline()` de
+`main.py` — aucun autre code à modifier.
 
 ### Agent 06 — Superviseur Post-Production (conditionnel)
 

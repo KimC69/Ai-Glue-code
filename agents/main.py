@@ -1,377 +1,343 @@
 """
-main.py — Orchestrateur principal du Studio IA Cinématographique.
+main.py — Point d'entrée du Studio IA Cinématographique.
 
 Architecture :
-  Input utilisateur
+  Input utilisateur (--idea ou saisie interactive)
        │
        ▼
-  [Agent 01 : DirecteurCreatif]   → vision_globale, genre, ton
+  [Orchestrateur central]  → planifie, exécute, réessaie, valide, journalise
+       │  (pipeline déclaratif : chaque étape décrit son agent, ses
+       │   entrées/sorties, sa criticité et son nombre de tentatives)
+       ▼
+  Agent 01 : DirecteurCreatif        → vision_globale, genre, ton       [critique]
+  Agent 02 : ArchitecteNarratif      → synopsis, actes, scènes clés     [critique]
+  Agent 03 : Scenariste              → dialogues, personnages           [critique]
+  Agent 04 : DirecteurArtistique     → script Blender (.py)             [critique]
+  Agent 05 : DirecteurTechnique      → script Unreal (.sh)              [critique]
+  Agent 06 : SuperviseurPostProd     → audit + outils conditionnels     [optionnel]
+  Agent 07 : ExporteurMultiFormat    → script FFmpeg multi-format       [optionnel]
        │
        ▼
-  [Agent 02 : ArchitecteNarratif] → synopsis, actes, scènes clés
-       │
-       ▼
-  [Agent 03 : Scenariste]         → dialogues, personnages
-       │
-       ▼
-  [Agent 04 : DirecteurArtistique]→ script Blender (.py)
-       │
-       ▼
-  [Agent 05 : DirecteurTechnique] → script Unreal (.sh)
-       │
-       ▼
-  [Agent 06 : SuperviseurPostProduction] → audit de conformité,
-                                            déclenche GIMP/Kdenlive
-                                            SEULEMENT si nécessaire
-        │
-        ▼
-  [Agent 07 : ExporteurMultiFormat] → déclinaison multi-format
+  output/ (scripts, notes, world_state.json)
 
 Usage :
     cd agents/
-    python main.py
+    python main.py                                     # saisie interactive
+    python main.py --idea "Un détective robot dans une ville néon"
+    python main.py --model gpt-4o                      # force un modèle partout
+    python main.py --reprendre                         # reprend après un échec
 """
 
+import argparse
 import os
 import sys
-import importlib.util
 
-# On importe la gestion de l'état (la Bible de production)
-from shared_state import WorldState
 from dotenv import load_dotenv
+
+from shared_state import WorldState
+from orchestrateur import Etape, Orchestrateur, ErreurEtapeCritique
+import utils_headless
 
 # Chargement des variables d'environnement (.env)
 load_dotenv()
 
-
-def _charger_agent(filename: str):
-    """
-    Charge un module Python depuis un fichier dont le nom commence par un chiffre.
-    Python n'autorise pas `from 01_directeur_creatif import ...` directement.
-    """
-    agents_dir = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(agents_dir, filename)
-    module_name = filename.replace(".py", "").replace("-", "_")
-    spec = importlib.util.spec_from_file_location(module_name, filepath)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+AGENTS_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(AGENTS_DIR, "output")
 
 
-def _afficher_erreur_agent(agent_nom: str, e: Exception, conseil: str = "") -> None:
-    """Affiche un message d'erreur clair quand un agent critique échoue."""
-    print(f"\n❌ [{agent_nom}] Échec : {e}")
-    if conseil:
-        print(f"\n{conseil}")
-    print("\nConseils généraux :")
-    print("  - Réessayez (les réponses LLM varient légèrement)")
-    print("  - Vérifiez votre quota sur platform.openai.com/usage")
-    print("  - Vérifiez que votre fichier .env contient une clé OPENAI_API_KEY valide")
+# ── Enregistrement des sorties de chaque agent dans WorldState ──────────────
+# Chaque callback reçoit (state, agent, resultat) et écrit les clés d'état.
 
-
-def _arreter_avec_etat(state: WorldState, agent_nom: str, e: Exception) -> None:
-    """Sauvegarde l'état courant et arrête proprement le pipeline."""
-    saved_path = state.save()
-    print(f"\n💾 État partiel sauvegardé → {saved_path}")
-    print(f"\n⛔ Le pipeline s'arrête ici car {agent_nom} est une étape critique.")
-    print("   Corrigez le problème et relancez. Le travail déjà effectué est conservé.")
-    sys.exit(1)
-
-
-def lancer_studio():
-    # ── 1. INITIALISATION ─────────────────────────────────────────────────────
-    # On crée l'objet qui gère la mémoire commune
-    state = WorldState()
-
-    # Chargement d'un état précédent si disponible
-    if state.load():
-        print("[Système] : État précédent chargé depuis output/world_state.json")
-
-    # ── 2. TON INPUT (La communication par prompt) ────────────────────────────
-    print("=" * 45)
-    print("=== BIENVENUE DANS VOTRE STUDIO IA ===")
-    print("=" * 45)
-    concept_initial = input("Quelle est votre idée de film aujourd'hui ?\n> ")
-
-    if not concept_initial.strip():
-        print("[Erreur] : L'idée ne peut pas être vide. Relancez le studio.")
-        sys.exit(1)
-
-    # Sauvegarde de l'idée initiale dans la mémoire commune
-    state.update("idea", concept_initial)
-
-    # ── 3. L'ACTION DE L'AGENT 01 ─────────────────────────────────────────────
-    # On charge le module via importlib (les noms commençant par un chiffre
-    # ne sont pas importables avec `from 01_... import ...` en Python standard)
-    module_01 = _charger_agent("01_directeur_creatif.py")
-    DirecteurCreatif = module_01.DirecteurCreatif
-
-    print(f"\n[Système] : Analyse du concept par le Directeur Créatif...")
-
-    try:
-        boss = DirecteurCreatif()
-        vision = boss.generer_vision(concept_initial)
-    except Exception as e:
-        _afficher_erreur_agent("Agent 01 - Directeur Créatif", e)
-        _arreter_avec_etat(state, "Agent 01 - Directeur Créatif", e)
-
-    # ── 4. SAUVEGARDE DANS LA MÉMOIRE (L'étape cruciale) ─────────────────────
-    # On enregistre la vision pour que les agents 02, 03, 04 puissent la lire
+def _enregistrer_vision(state, agent, vision):
     state.update("vision_globale", vision)
-    state.update("genre", boss.dernier_genre)
-    state.update("tone", boss.dernier_ton)
-    saved_path = state.save()
+    state.update("genre", agent.dernier_genre)
+    state.update("tone", agent.dernier_ton)
 
-    print("\n--- VISION VALIDÉE ET ENREGISTRÉE ---")
-    print(vision)
-    print(f"\n[Système] : État sauvegardé → {saved_path}")
 
-    # ── 5. L'ACTION DE L'AGENT 02 ─────────────────────────────────────────────
-    module_02 = _charger_agent("02_architecte_narratif.py")
-    ArchitecteNarratif = module_02.ArchitecteNarratif
-
-    print("\n[Système] : Construction de la structure narrative par l'Architecte...")
-
-    try:
-        architecte = ArchitecteNarratif()
-        structure = architecte.construire_structure(
-            vision_globale=state.get("vision_globale"),
-            genre=state.get("genre"),
-            tone=state.get("tone"),
-        )
-    except Exception as e:
-        _afficher_erreur_agent("Agent 02 - Architecte Narratif", e)
-        _arreter_avec_etat(state, "Agent 02 - Architecte Narratif", e)
-
-    # ── 6. SAUVEGARDE DANS LA MÉMOIRE ─────────────────────────────────────────
+def _enregistrer_structure(state, agent, structure):
     state.update("synopsis",   structure["synopsis"])
     state.update("acts",       structure["acts"])
     state.update("key_scenes", structure["key_scenes"])
-    saved_path = state.save()
 
-    print("\n--- STRUCTURE NARRATIVE VALIDÉE ET ENREGISTRÉE ---")
-    print(architecte.afficher_structure())
-    print(f"\n[Système] : État sauvegardé → {saved_path}")
 
-    # ── 7. L'ACTION DE L'AGENT 03 ─────────────────────────────────────────────
-    module_03 = _charger_agent("03_scenariste.py")
-    Scenariste = module_03.Scenariste
-
-    print("\n[Système] : Écriture du scénario par le Scénariste...")
-
-    try:
-        scribe = Scenariste()
-        scenario = scribe.ecrire_scenario(
-            synopsis=state.get("synopsis"),
-            acts=state.get("acts"),
-            key_scenes=state.get("key_scenes"),
-        )
-    except Exception as e:
-        _afficher_erreur_agent("Agent 03 - Scénariste", e)
-        _arreter_avec_etat(state, "Agent 03 - Scénariste", e)
-
-    # ── 8. SAUVEGARDE DANS LA MÉMOIRE ─────────────────────────────────────────
+def _enregistrer_scenario(state, agent, scenario):
     state.update("character_sheet",    scenario["character_sheet"])
     state.update("screenplay_excerpt", scenario["screenplay_excerpt"])
-    saved_path = state.save()
 
-    print("\n--- SCÉNARIO VALIDÉ ET ENREGISTRÉ ---")
-    print(scribe.afficher_scenario())
-    print(f"\n[Système] : État sauvegardé → {saved_path}")
 
-    # ── 9. L'ACTION DE L'AGENT 04 ─────────────────────────────────────────────
-    module_04 = _charger_agent("04_directeur_artistique.py")
-    DirecteurArtistique = module_04.DirecteurArtistique
+def _enregistrer_blender(state, agent, blender):
+    state.update("visual_style",       blender["visual_style"])
+    state.update("blender_script",     blender["blender_script"])
+    state.update("blender_saved_path", blender.get("saved_path", ""))
 
-    print("\n[Système] : Génération de la scène Blender par le Directeur Artistique...")
 
-    try:
-        da = DirecteurArtistique()
-        blender = da.creer_scene_blender(
-            screenplay_excerpt=state.get("screenplay_excerpt"),
-            character_sheet=state.get("character_sheet"),
-            genre=state.get("genre"),
-            tone=state.get("tone"),
-        )
-    except Exception as e:
-        _afficher_erreur_agent(
-            "Agent 04 - Directeur Artistique", e,
-            "Conseil : la génération de code Blender bénéficie du modèle gpt-4o."
-        )
-        _arreter_avec_etat(state, "Agent 04 - Directeur Artistique", e)
+def _enregistrer_unreal(state, agent, unreal):
+    state.update("technical_notes",   unreal["technical_notes"])
+    state.update("unreal_script",     unreal["unreal_script"])
+    state.update("unreal_saved_path", unreal.get("saved_path", ""))
 
-    # ── 10. SAUVEGARDE DANS LA MÉMOIRE ────────────────────────────────────────
-    state.update("visual_style",   blender["visual_style"])
-    state.update("blender_script", blender["blender_script"])
-    saved_path = state.save()
 
-    print("\n--- SCÈNE BLENDER GÉNÉRÉE ET ENREGISTRÉE ---")
-    print(da.afficher_resultat())
-    print(f"\n[Système] : État sauvegardé → {saved_path}")
+_CLES_AUDIT = (
+    "coherence_score", "issues",
+    "needs_gimp_retouching", "gimp_script",
+    "needs_video_editing", "video_editing_notes",
+    "needs_inkscape", "inkscape_notes",
+    "needs_darktable", "darktable_notes",
+    "needs_krita", "krita_script",
+    "needs_obs", "obs_notes",
+)
 
-    # ── 11. L'ACTION DE L'AGENT 05 ────────────────────────────────────────────
-    module_05 = _charger_agent("05_directeur_technique.py")
-    DirecteurTechnique = module_05.DirecteurTechnique
 
-    print("\n[Système] : Génération du setup Unreal Engine par le Directeur Technique...")
+def _enregistrer_audit(state, agent, audit):
+    for cle in _CLES_AUDIT:
+        state.update(cle, audit[cle])
+    state.update("gimp_saved_path",  audit.get("gimp_saved_path", ""))
+    state.update("krita_saved_path", audit.get("krita_saved_path", ""))
 
-    try:
-        dt = DirecteurTechnique()
-        unreal = dt.creer_setup_unreal(
-            visual_style=state.get("visual_style"),
-            blender_script=state.get("blender_script"),
-            genre=state.get("genre"),
-            tone=state.get("tone"),
-        )
-    except Exception as e:
-        _afficher_erreur_agent(
-            "Agent 05 - Directeur Technique", e,
-            "Conseil : la génération de code Unreal bénéficie du modèle gpt-4o."
-        )
-        _arreter_avec_etat(state, "Agent 05 - Directeur Technique", e)
 
-    # ── 12. SAUVEGARDE FINALE DANS LA MÉMOIRE ─────────────────────────────────
-    state.update("technical_notes", unreal["technical_notes"])
-    state.update("unreal_script",   unreal["unreal_script"])
-    saved_path = state.save()
+def _enregistrer_export(state, agent, export):
+    state.update("export_formats",    export["formats"])
+    state.update("ffmpeg_script",     export["ffmpeg_script"])
+    state.update("export_saved_path", export.get("saved_path", ""))
 
-    print("\n--- SETUP UNREAL ENGINE GÉNÉRÉ ET ENREGISTRÉ ---")
-    print(dt.afficher_resultat())
-    print(f"\n[Système] : État sauvegardé → {saved_path}")
 
-    # ── 13. L'ACTION DE L'AGENT 06 (audit conditionnel, entièrement optionnel) ─
-    module_06 = _charger_agent("06_superviseur_post_production.py")
-    SuperviseurPostProduction = module_06.SuperviseurPostProduction
+# ── Définition déclarative du pipeline ───────────────────────────────────────
 
-    print("\n[Système] : Audit de conformité par le Superviseur Post-Production...")
-    audit = None
-    try:
-        superviseur = SuperviseurPostProduction()
-        audit = superviseur.analyser_conformite(
-            visual_style=state.get("visual_style"),
-            technical_notes=state.get("technical_notes"),
-            blender_script=state.get("blender_script"),
-            unreal_script=state.get("unreal_script"),
-            genre=state.get("genre"),
-            tone=state.get("tone"),
-        )
-    except Exception as e:
-        print(f"\n⚠️  [Agent 06 - Superviseur Post-Production] Échec : {e}")
-        print("   L'audit de conformité a échoué — le pipeline continue sans lui.")
+def construire_pipeline() -> list:
+    """Décrit les 7 étapes du studio. L'Orchestrateur se charge du reste."""
+    return [
+        Etape(
+            numero=1, nom="Agent 01 - Directeur Créatif",
+            fichier="01_directeur_creatif.py",
+            classe="DirecteurCreatif", methode="generer_vision",
+            preparer=lambda s: {"idea": s.get("idea")},
+            enregistrer=_enregistrer_vision,
+            cles_sortie=("vision_globale", "genre", "tone"),
+            titre="VISION VALIDÉE ET ENREGISTRÉE",
+            afficher=lambda agent, vision: str(vision),
+            critique=True,
+        ),
+        Etape(
+            numero=2, nom="Agent 02 - Architecte Narratif",
+            fichier="02_architecte_narratif.py",
+            classe="ArchitecteNarratif", methode="construire_structure",
+            preparer=lambda s: {
+                "vision_globale": s.get("vision_globale"),
+                "genre": s.get("genre"),
+                "tone": s.get("tone"),
+            },
+            enregistrer=_enregistrer_structure,
+            cles_sortie=("synopsis", "acts", "key_scenes"),
+            titre="STRUCTURE NARRATIVE VALIDÉE ET ENREGISTRÉE",
+            afficher=lambda agent, r: agent.afficher_structure(),
+            critique=True,
+        ),
+        Etape(
+            numero=3, nom="Agent 03 - Scénariste",
+            fichier="03_scenariste.py",
+            classe="Scenariste", methode="ecrire_scenario",
+            preparer=lambda s: {
+                "synopsis": s.get("synopsis"),
+                "acts": s.get("acts"),
+                "key_scenes": s.get("key_scenes"),
+            },
+            enregistrer=_enregistrer_scenario,
+            cles_sortie=("character_sheet", "screenplay_excerpt"),
+            titre="SCÉNARIO VALIDÉ ET ENREGISTRÉ",
+            afficher=lambda agent, r: agent.afficher_scenario(),
+            critique=True,
+        ),
+        Etape(
+            numero=4, nom="Agent 04 - Directeur Artistique",
+            fichier="04_directeur_artistique.py",
+            classe="DirecteurArtistique", methode="creer_scene_blender",
+            preparer=lambda s: {
+                "screenplay_excerpt": s.get("screenplay_excerpt"),
+                "character_sheet": s.get("character_sheet"),
+                "genre": s.get("genre"),
+                "tone": s.get("tone"),
+            },
+            enregistrer=_enregistrer_blender,
+            cles_sortie=("visual_style", "blender_script"),
+            titre="SCÈNE BLENDER GÉNÉRÉE ET ENREGISTRÉE",
+            afficher=lambda agent, r: agent.afficher_resultat(),
+            critique=True,
+            conseil="Conseil : la génération de code Blender bénéficie du modèle gpt-4o.",
+        ),
+        Etape(
+            numero=5, nom="Agent 05 - Directeur Technique",
+            fichier="05_directeur_technique.py",
+            classe="DirecteurTechnique", methode="creer_setup_unreal",
+            preparer=lambda s: {
+                "visual_style": s.get("visual_style"),
+                "blender_script": s.get("blender_script"),
+                "genre": s.get("genre"),
+                "tone": s.get("tone"),
+            },
+            enregistrer=_enregistrer_unreal,
+            cles_sortie=("technical_notes", "unreal_script"),
+            titre="SETUP UNREAL ENGINE GÉNÉRÉ ET ENREGISTRÉ",
+            afficher=lambda agent, r: agent.afficher_resultat(),
+            critique=True,
+            conseil="Conseil : la génération de code Unreal bénéficie du modèle gpt-4o.",
+        ),
+        Etape(
+            numero=6, nom="Agent 06 - Superviseur Post-Production",
+            fichier="06_superviseur_post_production.py",
+            classe="SuperviseurPostProduction", methode="analyser_conformite",
+            preparer=lambda s: {
+                "visual_style": s.get("visual_style"),
+                "technical_notes": s.get("technical_notes"),
+                "blender_script": s.get("blender_script"),
+                "unreal_script": s.get("unreal_script"),
+                "genre": s.get("genre"),
+                "tone": s.get("tone"),
+            },
+            enregistrer=_enregistrer_audit,
+            cles_sortie=("coherence_score",),
+            titre="AUDIT DE CONFORMITÉ",
+            afficher=lambda agent, r: agent.afficher_rapport(),
+            critique=False,   # l'audit ne bloque jamais la production
+        ),
+        Etape(
+            numero=7, nom="Agent 07 - Exporteur Multi-Format",
+            fichier="07_exporteur_multi_format.py",
+            classe="ExporteurMultiFormat", methode="generer_exports",
+            preparer=lambda s: {
+                "vision_globale": s.get("vision_globale"),
+                "visual_style": s.get("visual_style"),
+                "technical_notes": s.get("technical_notes"),
+                "blender_script": s.get("blender_script"),
+                "unreal_script": s.get("unreal_script"),
+                "genre": s.get("genre"),
+                "tone": s.get("tone"),
+            },
+            enregistrer=_enregistrer_export,
+            cles_sortie=("ffmpeg_script",),
+            titre="EXPORTS MULTI-FORMAT GÉNÉRÉS",
+            afficher=lambda agent, r: agent.afficher_rapport(),
+            critique=False,   # l'export ne bloque jamais la production
+        ),
+    ]
 
-    if audit is not None:
-        for cle in (
-            "coherence_score", "issues",
-            "needs_gimp_retouching", "gimp_script",
-            "needs_video_editing", "video_editing_notes",
-            "needs_inkscape", "inkscape_notes",
-            "needs_darktable", "darktable_notes",
-            "needs_krita", "krita_script",
-            "needs_obs", "obs_notes",
-        ):
-            state.update(cle, audit[cle])
-        saved_path = state.save()
 
-        print("\n--- AUDIT DE CONFORMITÉ ---")
-        print(superviseur.afficher_rapport())
-        print(f"\n[Système] : État sauvegardé → {saved_path}")
+# ── Récapitulatif final et commandes headless ────────────────────────────────
 
-    # ── 14. L'ACTION DE L'AGENT 07 (export multi-format, optionnel) ─────────
-    print("\n[Système] : Préparation des exports multi-format...")
-    export = None
-    try:
-        module_07 = _charger_agent("07_exporteur_multi_format.py")
-        ExporteurMultiFormat = module_07.ExporteurMultiFormat
-        exporteur = ExporteurMultiFormat()
-        export = exporteur.generer_exports(
-            vision_globale=state.get("vision_globale"),
-            visual_style=state.get("visual_style"),
-            technical_notes=state.get("technical_notes"),
-            blender_script=state.get("blender_script"),
-            unreal_script=state.get("unreal_script"),
-            genre=state.get("genre"),
-            tone=state.get("tone"),
-        )
-    except Exception as e:
-        print(f"\n⚠️  [Agent 07 - Exporteur Multi-Format] Échec : {e}")
-        print("   L'export multi-format a échoué — le pipeline continue sans lui.")
+def _ecrire_notes_si_necessaire(actif, contenu: str, nom_fichier: str) -> str:
+    """
+    Écrit les notes d'un outil « instructions » (pas de script direct) dans un
+    fichier, uniquement si l'Agent 06 l'a jugé nécessaire.
+    Retourne le chemin, ou '' si non nécessaire.
+    """
+    if not actif or not contenu:
+        return ""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    filepath = os.path.join(OUTPUT_DIR, nom_fichier)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(contenu)
+    return filepath
 
-    if export is not None:
-        state.update("export_formats", export["formats"])
-        state.update("ffmpeg_script", export["ffmpeg_script"])
-        saved_path = state.save()
 
-        print("\n--- EXPORTS MULTI-FORMAT GÉNÉRÉS ---")
-        print(exporteur.afficher_rapport())
-        print(f"\n[Système] : État sauvegardé → {saved_path}")
-
-    # ── 15. FIN DE LA PRODUCTION ───────────────────────────────────────────────
+def _afficher_recap_final(state: WorldState, bilan: dict) -> None:
+    """Bannière de fin + commandes headless prêtes à l'emploi."""
     print("\n" + "=" * 45)
     print("  🎬 PIPELINE COMPLET — PRODUCTION TERMINÉE")
     print("=" * 45)
-    print(f"  État complet     : {saved_path}")
+    print(f"  État complet     : {WorldState.SAVE_PATH}")
     print(f"  Scripts générés  : agents/output/")
-    print("  Les 5 agents créatifs ont livré : vision, structure, scénario,")
-    print("  scène Blender et setup Unreal Engine.")
-    print("  Le Superviseur a déclenché uniquement les outils nécessaires.")
-    print("  L'Exporteur a préparé les déclinaisons multi-format.")
+    print(f"  Étapes réussies  : {len(bilan['reussies'])}"
+          + (f" | ignorées (reprise) : {len(bilan['ignorees'])}" if bilan["ignorees"] else "")
+          + (f" | échouées (optionnelles) : {len(bilan['echouees'])}" if bilan["echouees"] else ""))
     print("\n  ✅ Bonne production !")
 
-    # ── 16. COMMANDES HEADLESS PRÊTES À L'EMPLOI ─────────────────────────────
-    module_headless = _charger_agent("utils_headless.py")
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+    # Notes des outils « instructions » (pas de mode headless one-shot)
+    montage_notes_path = _ecrire_notes_si_necessaire(
+        state.get("needs_video_editing"), state.get("video_editing_notes"), "notes_montage.txt")
+    inkscape_notes_path = _ecrire_notes_si_necessaire(
+        state.get("needs_inkscape"), state.get("inkscape_notes"), "notes_inkscape.txt")
+    darktable_notes_path = _ecrire_notes_si_necessaire(
+        state.get("needs_darktable"), state.get("darktable_notes"), "notes_darktable.txt")
+    obs_notes_path = _ecrire_notes_si_necessaire(
+        state.get("needs_obs"), state.get("obs_notes"), "notes_obs.txt")
 
-    def _ecrire_notes_si_necessaire(actif: bool, contenu: str, nom_fichier: str) -> str:
-        """Écrit les notes d'un outil "instructions" (pas de script direct) dans
-        un fichier, uniquement si l'Agent 06 l'a jugé nécessaire. Retourne le
-        chemin, ou '' si non nécessaire."""
-        if not actif or not contenu:
-            return ""
-        os.makedirs(output_dir, exist_ok=True)
-        filepath = os.path.join(output_dir, nom_fichier)
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(contenu)
-        return filepath
+    blender_path = state.get("blender_saved_path", "")
+    unreal_path = state.get("unreal_saved_path", "")
 
-    gimp_path = ""
-    krita_path = ""
-    montage_notes_path = ""
-    inkscape_notes_path = ""
-    darktable_notes_path = ""
-    obs_notes_path = ""
-
-    if audit is not None:
-        if audit["needs_gimp_retouching"]:
-            gimp_path = audit["gimp_saved_path"]
-        if audit["needs_krita"]:
-            krita_path = audit["krita_saved_path"]
-        # Ces outils n'ont pas de vrai mode headless : on sauvegarde des notes
-        # d'instructions à suivre plutôt qu'un script directement exécutable.
-        montage_notes_path = _ecrire_notes_si_necessaire(
-            audit["needs_video_editing"], audit["video_editing_notes"], "notes_montage.txt"
+    if blender_path and unreal_path:
+        utils_headless.afficher_commandes_headless(
+            blender_path=blender_path,
+            unreal_path=unreal_path,
+            gimp_path=state.get("gimp_saved_path", "") if state.get("needs_gimp_retouching") else "",
+            montage_notes_path=montage_notes_path,
+            inkscape_notes_path=inkscape_notes_path,
+            darktable_notes_path=darktable_notes_path,
+            krita_path=state.get("krita_saved_path", "") if state.get("needs_krita") else "",
+            obs_notes_path=obs_notes_path,
+            export_script_path=state.get("export_saved_path", ""),
         )
-        inkscape_notes_path = _ecrire_notes_si_necessaire(
-            audit["needs_inkscape"], audit["inkscape_notes"], "notes_inkscape.txt"
-        )
-        darktable_notes_path = _ecrire_notes_si_necessaire(
-            audit["needs_darktable"], audit["darktable_notes"], "notes_darktable.txt"
-        )
-        obs_notes_path = _ecrire_notes_si_necessaire(
-            audit["needs_obs"], audit["obs_notes"], "notes_obs.txt"
-        )
-
-    module_headless.afficher_commandes_headless(
-        blender_path=blender["saved_path"],
-        unreal_path=unreal["saved_path"],
-        gimp_path=gimp_path,
-        montage_notes_path=montage_notes_path,
-        inkscape_notes_path=inkscape_notes_path,
-        darktable_notes_path=darktable_notes_path,
-        krita_path=krita_path,
-        obs_notes_path=obs_notes_path,
-        export_script_path=export["saved_path"] if export else "",
-    )
+    else:
+        print("\n  ℹ️  Chemins des scripts Blender/Unreal absents de l'état —")
+        print("     commandes headless non affichées. Relancez le pipeline complet.")
     print()
+
+
+# ── Point d'entrée ────────────────────────────────────────────────────────────
+
+def lancer_studio(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Studio IA Cinématographique — pipeline multi-agents "
+                    "(vision → scénario → Blender → Unreal → post-prod → exports).")
+    parser.add_argument("--idea", type=str, default="",
+                        help="Idée de film (sinon : saisie interactive)")
+    parser.add_argument("--model", type=str, default="",
+                        help="Force un modèle OpenAI pour TOUS les agents (ex : gpt-4o)")
+    parser.add_argument("--reprendre", action="store_true",
+                        help="Reprend une production interrompue : saute les étapes "
+                             "dont les résultats sont déjà dans world_state.json")
+    args = parser.parse_args(argv)
+
+    # ── 1. Initialisation de la mémoire commune ──────────────────────────────
+    state = WorldState()
+    if state.load():
+        print("[Système] : État précédent chargé depuis output/world_state.json")
+
+    # ── 2. L'idée initiale ───────────────────────────────────────────────────
+    print("=" * 45)
+    print("=== BIENVENUE DANS VOTRE STUDIO IA ===")
+    print("=" * 45)
+
+    concept_initial = args.idea.strip()
+    if not concept_initial and args.reprendre:
+        # En reprise, on réutilise l'idée de la production interrompue
+        concept_initial = str(state.get("idea", "")).strip()
+        if concept_initial:
+            print(f"[Système] : Reprise de la production — idée : {concept_initial}")
+    if not concept_initial:
+        concept_initial = input("Quelle est votre idée de film aujourd'hui ?\n> ").strip()
+
+    if not concept_initial:
+        print("[Erreur] : L'idée ne peut pas être vide. Relancez le studio.")
+        sys.exit(1)
+
+    state.update("idea", concept_initial)
+
+    # ── 3. Exécution du pipeline par l'orchestrateur central ────────────────
+    orchestrateur = Orchestrateur(
+        state=state,
+        etapes=construire_pipeline(),
+        dossier_agents=AGENTS_DIR,
+        surcharge_modele=args.model.strip() or None,
+        reprendre=args.reprendre,
+    )
+
+    try:
+        bilan = orchestrateur.executer()
+    except ErreurEtapeCritique:
+        # L'orchestrateur a déjà tout affiché et sauvegardé l'état partiel.
+        sys.exit(1)
+
+    # ── 4. Récapitulatif final ───────────────────────────────────────────────
+    _afficher_recap_final(state, bilan)
 
 
 if __name__ == "__main__":
