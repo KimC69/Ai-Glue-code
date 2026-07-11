@@ -6,12 +6,8 @@ Expose la classe DirecteurArtistique avec la méthode creer_scene_blender().
 
 import os
 import re
-import sys
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain.output_parsers import OutputFixingParser
 from langchain_core.exceptions import OutputParserException
+from agent_base import BaseAgent
 from shared_state import ArtDirectorOutput
 
 
@@ -66,7 +62,7 @@ def _securiser_nom_fichier(filename: str) -> str:
     return safe[:80] if len(safe) > 80 else safe
 
 
-class DirecteurArtistique:
+class DirecteurArtistique(BaseAgent):
     """
     Agent 04 — Directeur Artistique (Blender).
 
@@ -86,22 +82,13 @@ class DirecteurArtistique:
 
     def __init__(self, model: str = "gpt-4o", temperature: float = 0.4):
         # gpt-4o par défaut ici : la génération de code bénéficie d'un modèle plus puissant
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            print("\n⚠️  OPENAI_API_KEY manquante.")
-            print("   Copiez .env.example en .env et ajoutez votre clé OpenAI.")
-            sys.exit(1)
-
-        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
-
-        base_parser = PydanticOutputParser(pydantic_object=ArtDirectorOutput)
-        self.parser = OutputFixingParser.from_llm(parser=base_parser, llm=self.llm)
-        self.base_parser = base_parser
-
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("human", USER_PROMPT),
-        ]).partial(format_instructions=base_parser.get_format_instructions())
+        super().__init__(
+            model=model,
+            temperature=temperature,
+            output_schema=ArtDirectorOutput,
+            agent_id="Agent 04",
+        )
+        self.prompt = self._build_prompt(SYSTEM_PROMPT, USER_PROMPT)
 
     def creer_scene_blender(
         self,

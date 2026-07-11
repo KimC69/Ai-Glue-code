@@ -58,6 +58,26 @@ def _charger_agent(filename: str):
     return module
 
 
+def _afficher_erreur_agent(agent_nom: str, e: Exception, conseil: str = "") -> None:
+    """Affiche un message d'erreur clair quand un agent critique échoue."""
+    print(f"\n❌ [{agent_nom}] Échec : {e}")
+    if conseil:
+        print(f"\n{conseil}")
+    print("\nConseils généraux :")
+    print("  - Réessayez (les réponses LLM varient légèrement)")
+    print("  - Vérifiez votre quota sur platform.openai.com/usage")
+    print("  - Vérifiez que votre fichier .env contient une clé OPENAI_API_KEY valide")
+
+
+def _arreter_avec_etat(state: WorldState, agent_nom: str, e: Exception) -> None:
+    """Sauvegarde l'état courant et arrête proprement le pipeline."""
+    saved_path = state.save()
+    print(f"\n💾 État partiel sauvegardé → {saved_path}")
+    print(f"\n⛔ Le pipeline s'arrête ici car {agent_nom} est une étape critique.")
+    print("   Corrigez le problème et relancez. Le travail déjà effectué est conservé.")
+    sys.exit(1)
+
+
 def lancer_studio():
     # ── 1. INITIALISATION ─────────────────────────────────────────────────────
     # On crée l'objet qui gère la mémoire commune
@@ -87,16 +107,13 @@ def lancer_studio():
     DirecteurCreatif = module_01.DirecteurCreatif
 
     print(f"\n[Système] : Analyse du concept par le Directeur Créatif...")
-    boss = DirecteurCreatif()
 
     try:
+        boss = DirecteurCreatif()
         vision = boss.generer_vision(concept_initial)
-    except RuntimeError as e:
-        print(f"\n❌ {e}")
-        print("\nConseils :")
-        print("  - Réessayez (les réponses LLM varient légèrement)")
-        print("  - Vérifiez votre quota sur platform.openai.com/usage")
-        sys.exit(1)
+    except Exception as e:
+        _afficher_erreur_agent("Agent 01 - Directeur Créatif", e)
+        _arreter_avec_etat(state, "Agent 01 - Directeur Créatif", e)
 
     # ── 4. SAUVEGARDE DANS LA MÉMOIRE (L'étape cruciale) ─────────────────────
     # On enregistre la vision pour que les agents 02, 03, 04 puissent la lire
@@ -114,20 +131,17 @@ def lancer_studio():
     ArchitecteNarratif = module_02.ArchitecteNarratif
 
     print("\n[Système] : Construction de la structure narrative par l'Architecte...")
-    architecte = ArchitecteNarratif()
 
     try:
+        architecte = ArchitecteNarratif()
         structure = architecte.construire_structure(
             vision_globale=state.get("vision_globale"),
             genre=state.get("genre"),
             tone=state.get("tone"),
         )
-    except RuntimeError as e:
-        print(f"\n❌ {e}")
-        print("\nConseils :")
-        print("  - Réessayez (les réponses LLM varient légèrement)")
-        print("  - Vérifiez votre quota sur platform.openai.com/usage")
-        sys.exit(1)
+    except Exception as e:
+        _afficher_erreur_agent("Agent 02 - Architecte Narratif", e)
+        _arreter_avec_etat(state, "Agent 02 - Architecte Narratif", e)
 
     # ── 6. SAUVEGARDE DANS LA MÉMOIRE ─────────────────────────────────────────
     state.update("synopsis",   structure["synopsis"])
@@ -144,20 +158,17 @@ def lancer_studio():
     Scenariste = module_03.Scenariste
 
     print("\n[Système] : Écriture du scénario par le Scénariste...")
-    scribe = Scenariste()
 
     try:
+        scribe = Scenariste()
         scenario = scribe.ecrire_scenario(
             synopsis=state.get("synopsis"),
             acts=state.get("acts"),
             key_scenes=state.get("key_scenes"),
         )
-    except RuntimeError as e:
-        print(f"\n❌ {e}")
-        print("\nConseils :")
-        print("  - Réessayez (les réponses LLM varient légèrement)")
-        print("  - Vérifiez votre quota sur platform.openai.com/usage")
-        sys.exit(1)
+    except Exception as e:
+        _afficher_erreur_agent("Agent 03 - Scénariste", e)
+        _arreter_avec_etat(state, "Agent 03 - Scénariste", e)
 
     # ── 8. SAUVEGARDE DANS LA MÉMOIRE ─────────────────────────────────────────
     state.update("character_sheet",    scenario["character_sheet"])
@@ -173,22 +184,21 @@ def lancer_studio():
     DirecteurArtistique = module_04.DirecteurArtistique
 
     print("\n[Système] : Génération de la scène Blender par le Directeur Artistique...")
-    da = DirecteurArtistique()
 
     try:
+        da = DirecteurArtistique()
         blender = da.creer_scene_blender(
             screenplay_excerpt=state.get("screenplay_excerpt"),
             character_sheet=state.get("character_sheet"),
             genre=state.get("genre"),
             tone=state.get("tone"),
         )
-    except RuntimeError as e:
-        print(f"\n❌ {e}")
-        print("\nConseils :")
-        print("  - Réessayez (les réponses LLM varient légèrement)")
-        print("  - Utilisez --model gpt-4o pour de meilleures réponses de code")
-        print("  - Vérifiez votre quota sur platform.openai.com/usage")
-        sys.exit(1)
+    except Exception as e:
+        _afficher_erreur_agent(
+            "Agent 04 - Directeur Artistique", e,
+            "Conseil : la génération de code Blender bénéficie du modèle gpt-4o."
+        )
+        _arreter_avec_etat(state, "Agent 04 - Directeur Artistique", e)
 
     # ── 10. SAUVEGARDE DANS LA MÉMOIRE ────────────────────────────────────────
     state.update("visual_style",   blender["visual_style"])
@@ -204,22 +214,21 @@ def lancer_studio():
     DirecteurTechnique = module_05.DirecteurTechnique
 
     print("\n[Système] : Génération du setup Unreal Engine par le Directeur Technique...")
-    dt = DirecteurTechnique()
 
     try:
+        dt = DirecteurTechnique()
         unreal = dt.creer_setup_unreal(
             visual_style=state.get("visual_style"),
             blender_script=state.get("blender_script"),
             genre=state.get("genre"),
             tone=state.get("tone"),
         )
-    except RuntimeError as e:
-        print(f"\n❌ {e}")
-        print("\nConseils :")
-        print("  - Réessayez (les réponses LLM varient légèrement)")
-        print("  - Utilisez --model gpt-4o pour de meilleures réponses de code")
-        print("  - Vérifiez votre quota sur platform.openai.com/usage")
-        sys.exit(1)
+    except Exception as e:
+        _afficher_erreur_agent(
+            "Agent 05 - Directeur Technique", e,
+            "Conseil : la génération de code Unreal bénéficie du modèle gpt-4o."
+        )
+        _arreter_avec_etat(state, "Agent 05 - Directeur Technique", e)
 
     # ── 12. SAUVEGARDE FINALE DANS LA MÉMOIRE ─────────────────────────────────
     state.update("technical_notes", unreal["technical_notes"])
@@ -246,8 +255,8 @@ def lancer_studio():
             genre=state.get("genre"),
             tone=state.get("tone"),
         )
-    except RuntimeError as e:
-        print(f"\n⚠️  {e}")
+    except Exception as e:
+        print(f"\n⚠️  [Agent 06 - Superviseur Post-Production] Échec : {e}")
         print("   L'audit de conformité a échoué — le pipeline continue sans lui.")
 
     if audit is not None:
@@ -283,8 +292,8 @@ def lancer_studio():
             genre=state.get("genre"),
             tone=state.get("tone"),
         )
-    except RuntimeError as e:
-        print(f"\n⚠️  {e}")
+    except Exception as e:
+        print(f"\n⚠️  [Agent 07 - Exporteur Multi-Format] Échec : {e}")
         print("   L'export multi-format a échoué — le pipeline continue sans lui.")
 
     if export is not None:

@@ -4,13 +4,8 @@ Rôle : Écrire les fiches personnages et l'extrait de scénario format Hollywoo
 Expose la classe Scenariste avec la méthode ecrire_scenario().
 """
 
-import os
-import sys
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain.output_parsers import OutputFixingParser
 from langchain_core.exceptions import OutputParserException
+from agent_base import BaseAgent
 from shared_state import ScreenwriterOutput
 
 
@@ -41,12 +36,12 @@ Scènes clés : {key_scenes}
 {format_instructions}"""
 
 
-class Scenariste:
+class Scenariste(BaseAgent):
     """
     Agent 03 — Scénariste.
 
     Lit la structure narrative dans WorldState, produit les fiches
-    personnages et l'extrait de scénario format Hollywood.
+    personnages et l’extrait de scénario format Hollywood.
 
     Usage :
         scribe = Scenariste()
@@ -59,22 +54,13 @@ class Scenariste:
     """
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.8):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            print("\n⚠️  OPENAI_API_KEY manquante.")
-            print("   Copiez .env.example en .env et ajoutez votre clé OpenAI.")
-            sys.exit(1)
-
-        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
-
-        base_parser = PydanticOutputParser(pydantic_object=ScreenwriterOutput)
-        self.parser = OutputFixingParser.from_llm(parser=base_parser, llm=self.llm)
-        self.base_parser = base_parser
-
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("human", USER_PROMPT),
-        ]).partial(format_instructions=base_parser.get_format_instructions())
+        super().__init__(
+            model=model,
+            temperature=temperature,
+            output_schema=ScreenwriterOutput,
+            agent_id="Agent 03",
+        )
+        self.prompt = self._build_prompt(SYSTEM_PROMPT, USER_PROMPT)
 
     def ecrire_scenario(self, synopsis: str, acts: str, key_scenes: str) -> dict:
         """

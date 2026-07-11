@@ -9,12 +9,8 @@ cet agent de trancher, pas une étape systématique du pipeline.
 """
 
 import os
-import sys
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain.output_parsers import OutputFixingParser
 from langchain_core.exceptions import OutputParserException
+from agent_base import BaseAgent
 from shared_state import PostProductionOutput
 
 
@@ -79,7 +75,7 @@ si une intervention est réellement nécessaire :
 {format_instructions}"""
 
 
-class SuperviseurPostProduction:
+class SuperviseurPostProduction(BaseAgent):
     """
     Agent 06 — Superviseur Post-Production.
 
@@ -97,27 +93,13 @@ class SuperviseurPostProduction:
     """
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            # Agent 06 est optionnel dans le pipeline (audit de conformité) :
-            # on lève une exception récupérable plutôt que de tuer tout le
-            # processus avec sys.exit(), pour que main.py puisse continuer
-            # sans l'audit si nécessaire.
-            raise RuntimeError(
-                "[Agent 06] OPENAI_API_KEY manquante. "
-                "Copiez .env.example en .env et ajoutez votre clé OpenAI."
-            )
-
-        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
-
-        base_parser = PydanticOutputParser(pydantic_object=PostProductionOutput)
-        self.parser = OutputFixingParser.from_llm(parser=base_parser, llm=self.llm)
-        self.base_parser = base_parser
-
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("human", USER_PROMPT),
-        ]).partial(format_instructions=base_parser.get_format_instructions())
+        super().__init__(
+            model=model,
+            temperature=temperature,
+            output_schema=PostProductionOutput,
+            agent_id="Agent 06",
+        )
+        self.prompt = self._build_prompt(SYSTEM_PROMPT, USER_PROMPT)
 
     def analyser_conformite(
         self,

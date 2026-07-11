@@ -4,13 +4,8 @@ Rôle : Construire la structure dramaturgique complète à partir de la vision d
 Expose la classe ArchitecteNarratif avec la méthode construire_structure().
 """
 
-import os
-import sys
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain.output_parsers import OutputFixingParser
 from langchain_core.exceptions import OutputParserException
+from agent_base import BaseAgent
 from shared_state import NarrativeOutput
 
 
@@ -35,7 +30,7 @@ Construis la structure narrative. Fournis exactement :
 {format_instructions}"""
 
 
-class ArchitecteNarratif:
+class ArchitecteNarratif(BaseAgent):
     """
     Agent 02 — Architecte Narratif.
 
@@ -53,22 +48,13 @@ class ArchitecteNarratif:
     """
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.7):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            print("\n⚠️  OPENAI_API_KEY manquante.")
-            print("   Copiez .env.example en .env et ajoutez votre clé OpenAI.")
-            sys.exit(1)
-
-        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
-
-        base_parser = PydanticOutputParser(pydantic_object=NarrativeOutput)
-        self.parser = OutputFixingParser.from_llm(parser=base_parser, llm=self.llm)
-        self.base_parser = base_parser
-
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("human", USER_PROMPT),
-        ]).partial(format_instructions=base_parser.get_format_instructions())
+        super().__init__(
+            model=model,
+            temperature=temperature,
+            output_schema=NarrativeOutput,
+            agent_id="Agent 02",
+        )
+        self.prompt = self._build_prompt(SYSTEM_PROMPT, USER_PROMPT)
 
     def construire_structure(self, vision_globale: str, genre: str, tone: str) -> dict:
         """

@@ -5,12 +5,8 @@ Expose la classe DirecteurCreatif avec la méthode generer_vision().
 """
 
 import os
-import sys
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain.output_parsers import OutputFixingParser
 from langchain_core.exceptions import OutputParserException
+from agent_base import BaseAgent
 from shared_state import DirectorOutput
 
 
@@ -31,7 +27,7 @@ Développe la vision artistique avec précision. Fournis :
 {format_instructions}"""
 
 
-class DirecteurCreatif:
+class DirecteurCreatif(BaseAgent):
     """
     Agent 01 — Directeur Créatif.
 
@@ -41,23 +37,13 @@ class DirecteurCreatif:
     """
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.7):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            print("\n⚠️  OPENAI_API_KEY manquante.")
-            print("   Copiez .env.example en .env et ajoutez votre clé OpenAI.")
-            sys.exit(1)
-
-        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
-
-        base_parser = PydanticOutputParser(pydantic_object=DirectorOutput)
-        # OutputFixingParser : si le JSON est malformé, le LLM se corrige seul
-        self.parser = OutputFixingParser.from_llm(parser=base_parser, llm=self.llm)
-        self.base_parser = base_parser
-
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("human", USER_PROMPT),
-        ]).partial(format_instructions=base_parser.get_format_instructions())
+        super().__init__(
+            model=model,
+            temperature=temperature,
+            output_schema=DirectorOutput,
+            agent_id="Agent 01",
+        )
+        self.prompt = self._build_prompt(SYSTEM_PROMPT, USER_PROMPT)
 
     def generer_vision(self, idea: str) -> str:
         """

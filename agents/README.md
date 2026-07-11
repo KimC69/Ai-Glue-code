@@ -85,6 +85,7 @@ python main.py --model gpt-4o --idea "Un moine shaolin découvre que son temple 
 | Fichier | Rôle |
 |---------|------|
 | `shared_state.py` | `WorldState` (mémoire commune) + schémas Pydantic par agent |
+| `agent_base.py` | Classe de base `BaseAgent` partagée par tous les agents (initialisation LLM, parser, gestion d'erreurs) |
 | `01_directeur_creatif.py` | Agent 01 — classe `DirecteurCreatif` : vision, genre, ton |
 | `02_architecte_narratif.py` | Agent 02 — classe `ArchitecteNarratif` : synopsis, actes, scènes clés |
 | `03_scenariste.py` | Agent 03 — classe `Scenariste` : fiches personnages, extrait scénario |

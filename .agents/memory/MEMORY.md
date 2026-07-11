@@ -1,0 +1,1 @@
+- [Architecture des agents](agent-architecture.md) — Classe de base `BaseAgent` + gestion centralisée des erreurs dans l'orchestrateur.
