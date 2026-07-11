@@ -1,1 +1,1 @@
-- [Architecture des agents](agent-architecture.md) — BaseAgent commun + pipeline déclaratif (Etape/Orchestrateur) : retry, validation des sorties, reprise ; agents sans sys.exit().
+- [Architecture des agents](agent-architecture.md) — BaseAgent + pipeline déclaratif (Etape/Orchestrateur) : retry, validation, reprise, HITL --interactif ; agents sans sys.exit().

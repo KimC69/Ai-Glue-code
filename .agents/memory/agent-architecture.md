@@ -32,3 +32,18 @@ Le pipeline est décrit comme des données (`Etape` : agent, entrées, sorties, 
 - Nouvel agent dans le pipeline = ajouter une `Etape` dans `construire_pipeline()` (main.py), rien d'autre.
 - La validation « sortie remplie » compare à `""` (et non à la truthiness) car `False` et `0` sont des sorties valides (bools/scores de l'audit).
 - Les chemins des fichiers générés (`*_saved_path`) sont persistés dans l'état pour que le récap final et la reprise fonctionnent après un redémarrage.
+- Échec définitif d'une étape optionnelle → ses clés `purger` sont réinitialisées, sinon le récap final ressortirait les données d'une production précédente.
+- `--reprendre` refuse une `--idea` différente de celle en cours (sinon état mixte : nouvelle idée + anciens artefacts).
+- `state.load()` uniquement sous `--reprendre` : sans lui, production vierge qui écrase l'ancien fichier — c'est ce qui empêche tout mélange inter-productions lors des skips de reprise.
+- Une révision HITL échouée déclenche un rollback complet (snapshot `to_dict()` avant le tour) ; les callbacks `enregistrer` doivent écrire un jeu de clés stable pour que le rollback soit exhaustif.
+
+## Human-in-the-loop (--interactif)
+
+Les étapes créatives (01–05) portent `point_validation=True` + `champ_feedback` : après exécution réussie, l'utilisateur valide, demande une révision, ou arrête proprement (`ArretUtilisateur` → exit 0, reprise via `--reprendre`). Les directives de révision sont réinjectées en APPEND dans le kwarg d'entrée désigné par `champ_feedback` — aucun agent ni prompt n'a été modifié.
+
+**Why:** Réinjecter le feedback dans un kwarg textuel existant évite de toucher aux 7 agents ; un arrêt volontaire n'est pas une erreur (exit 0, contrairement à l'échec critique exit 1) ; une révision qui échoue conserve le résultat précédent au lieu de casser le pipeline.
+
+**How to apply:**
+- Étape validable = `point_validation=True` + `champ_feedback="<kwarg textuel principal>"` (01→idea, 02→vision_globale, 03→synopsis, 04→screenplay_excerpt, 05→visual_style).
+- Les directives s'accumulent entre révisions d'une même étape (l'agent voit tout l'historique).
+- EOF sur stdin (pipe/CI) = validation automatique, jamais de crash.

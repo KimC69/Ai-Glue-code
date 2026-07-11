@@ -73,13 +73,36 @@ python main.py --model gpt-4o --idea "Un moine shaolin découvre que son temple 
 
 # Reprendre une production interrompue (saute les étapes déjà complétées)
 python main.py --reprendre
+
+# Mode Human-in-the-loop : valider, réviser ou arrêter à chaque étape créative
+python main.py --interactif
 ```
 
 En cas d'échec d'une étape critique (Agents 01 à 05), l'état partiel est
 sauvegardé automatiquement : corrigez le problème puis relancez avec
-`--reprendre` pour continuer là où la production s'était arrêtée. Chaque
+`--reprendre` pour continuer là où la production s'était arrêtée. Sans
+`--reprendre`, chaque lancement démarre une production vierge (l'état
+précédent est écrasé — jamais de mélange entre deux productions). Chaque
 appel LLM est retenté une fois automatiquement avant de déclarer l'échec.
-Les Agents 06 et 07 sont optionnels : leur échec n'arrête jamais le pipeline.
+Les Agents 06 et 07 sont optionnels : leur échec n'arrête jamais le pipeline
+(et leurs sorties sont alors réinitialisées pour ne jamais afficher de
+données d'une production précédente).
+
+### Human-in-the-loop (`--interactif`)
+
+Avec `--interactif`, la production s'arrête après chaque étape créative
+(Agents 01 à 05) pour vous laisser la main :
+
+| Choix | Effet |
+|---|---|
+| `[Entrée]` | Valider le résultat et continuer la production |
+| `r` | Demander une révision — vos directives sont réinjectées dans l'entrée de l'agent, qui régénère une nouvelle version |
+| `q` | Arrêter proprement — l'état est sauvegardé, reprise avec `--reprendre --interactif` |
+
+Les directives de révision s'accumulent (l'agent voit toutes vos remarques
+précédentes) et une révision qui échoue ne casse rien : le résultat précédent
+reste en vigueur. Sans terminal interactif (pipe, CI), les validations sont
+acceptées automatiquement.
 
 ## Modèles disponibles
 
@@ -128,8 +151,10 @@ objet `Etape` (agent, entrées, sorties, criticité, tentatives) et le moteur
   et le pipeline continue ;
 - **Reprise** : `--reprendre` saute les étapes dont les sorties sont déjà
   dans `world_state.json` ;
+- **Human-in-the-loop** : `--interactif` insère des arrêts contrôlés après
+  chaque étape créative (valider / réviser avec directives / arrêter) ;
 - **Bilan** : un récapitulatif final liste les étapes réussies / ignorées /
-  échouées avec leur durée.
+  échouées avec leur durée et le nombre de révisions humaines.
 
 Pour ajouter un agent au pipeline : créer le fichier de l'agent (hériter de
 `BaseAgent`), puis ajouter une `Etape` dans `construire_pipeline()` de

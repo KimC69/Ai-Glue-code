@@ -26,6 +26,7 @@ Usage :
     python main.py --idea "Un détective robot dans une ville néon"
     python main.py --model gpt-4o                      # force un modèle partout
     python main.py --reprendre                         # reprend après un échec
+    python main.py --interactif                        # validation humaine (HITL)
 """
 
 import argparse
@@ -35,7 +36,7 @@ import sys
 from dotenv import load_dotenv
 
 from shared_state import WorldState
-from orchestrateur import Etape, Orchestrateur, ErreurEtapeCritique
+from orchestrateur import Etape, Orchestrateur, ErreurEtapeCritique, ArretUtilisateur
 import utils_headless
 
 # Chargement des variables d'environnement (.env)
@@ -116,6 +117,7 @@ def construire_pipeline() -> list:
             titre="VISION VALIDÉE ET ENREGISTRÉE",
             afficher=lambda agent, vision: str(vision),
             critique=True,
+            point_validation=True, champ_feedback="idea",
         ),
         Etape(
             numero=2, nom="Agent 02 - Architecte Narratif",
@@ -131,6 +133,7 @@ def construire_pipeline() -> list:
             titre="STRUCTURE NARRATIVE VALIDÉE ET ENREGISTRÉE",
             afficher=lambda agent, r: agent.afficher_structure(),
             critique=True,
+            point_validation=True, champ_feedback="vision_globale",
         ),
         Etape(
             numero=3, nom="Agent 03 - Scénariste",
@@ -146,6 +149,7 @@ def construire_pipeline() -> list:
             titre="SCÉNARIO VALIDÉ ET ENREGISTRÉ",
             afficher=lambda agent, r: agent.afficher_scenario(),
             critique=True,
+            point_validation=True, champ_feedback="synopsis",
         ),
         Etape(
             numero=4, nom="Agent 04 - Directeur Artistique",
@@ -158,11 +162,12 @@ def construire_pipeline() -> list:
                 "tone": s.get("tone"),
             },
             enregistrer=_enregistrer_blender,
-            cles_sortie=("visual_style", "blender_script"),
+            cles_sortie=("visual_style", "blender_script", "blender_saved_path"),
             titre="SCÈNE BLENDER GÉNÉRÉE ET ENREGISTRÉE",
             afficher=lambda agent, r: agent.afficher_resultat(),
             critique=True,
             conseil="Conseil : la génération de code Blender bénéficie du modèle gpt-4o.",
+            point_validation=True, champ_feedback="screenplay_excerpt",
         ),
         Etape(
             numero=5, nom="Agent 05 - Directeur Technique",
@@ -175,11 +180,12 @@ def construire_pipeline() -> list:
                 "tone": s.get("tone"),
             },
             enregistrer=_enregistrer_unreal,
-            cles_sortie=("technical_notes", "unreal_script"),
+            cles_sortie=("technical_notes", "unreal_script", "unreal_saved_path"),
             titre="SETUP UNREAL ENGINE GÉNÉRÉ ET ENREGISTRÉ",
             afficher=lambda agent, r: agent.afficher_resultat(),
             critique=True,
             conseil="Conseil : la génération de code Unreal bénéficie du modèle gpt-4o.",
+            point_validation=True, champ_feedback="visual_style",
         ),
         Etape(
             numero=6, nom="Agent 06 - Superviseur Post-Production",
@@ -198,6 +204,7 @@ def construire_pipeline() -> list:
             titre="AUDIT DE CONFORMITÉ",
             afficher=lambda agent, r: agent.afficher_rapport(),
             critique=False,   # l'audit ne bloque jamais la production
+            purger=_CLES_AUDIT + ("gimp_saved_path", "krita_saved_path"),
         ),
         Etape(
             numero=7, nom="Agent 07 - Exporteur Multi-Format",
@@ -213,10 +220,11 @@ def construire_pipeline() -> list:
                 "tone": s.get("tone"),
             },
             enregistrer=_enregistrer_export,
-            cles_sortie=("ffmpeg_script",),
+            cles_sortie=("ffmpeg_script", "export_saved_path"),
             titre="EXPORTS MULTI-FORMAT GÉNÉRÉS",
             afficher=lambda agent, r: agent.afficher_rapport(),
             critique=False,   # l'export ne bloque jamais la production
+            purger=("export_formats", "ffmpeg_script", "export_saved_path"),
         ),
     ]
 
@@ -294,12 +302,28 @@ def lancer_studio(argv=None):
     parser.add_argument("--reprendre", action="store_true",
                         help="Reprend une production interrompue : saute les étapes "
                              "dont les résultats sont déjà dans world_state.json")
+    parser.add_argument("--interactif", action="store_true",
+                        help="Active les points de validation Human-in-the-loop : après "
+                             "chaque étape créative (Agents 01 à 05), validez le résultat, "
+                             "demandez une révision avec vos directives, ou arrêtez proprement")
     args = parser.parse_args(argv)
 
+    if args.interactif and not sys.stdin.isatty():
+        print("[Avertissement] : --interactif sans terminal interactif — "
+              "les validations seront acceptées automatiquement.")
+
     # ── 1. Initialisation de la mémoire commune ──────────────────────────────
+    # L'état précédent n'est rechargé qu'en mode --reprendre : une nouvelle
+    # production démarre toujours d'un état vierge, sinon les sorties d'une
+    # ancienne production pourraient se mélanger à la nouvelle au moment de
+    # la reprise (étapes sautées sur la base de données périmées).
     state = WorldState()
-    if state.load():
-        print("[Système] : État précédent chargé depuis output/world_state.json")
+    if args.reprendre:
+        if state.load():
+            print("[Système] : État précédent chargé depuis output/world_state.json")
+        else:
+            print("[Avertissement] : --reprendre demandé mais aucun état précédent "
+                  "trouvé — la production repart du début.")
 
     # ── 2. L'idée initiale ───────────────────────────────────────────────────
     print("=" * 45)
@@ -307,6 +331,15 @@ def lancer_studio(argv=None):
     print("=" * 45)
 
     concept_initial = args.idea.strip()
+    if args.reprendre and concept_initial:
+        idee_en_cours = str(state.get("idea", "")).strip()
+        if idee_en_cours and idee_en_cours != concept_initial:
+            print("[Erreur] : --reprendre continue la production en cours, mais --idea")
+            print("           fournit une idée différente de celle de cette production.")
+            print(f"           Idée de la production en cours : {idee_en_cours}")
+            print("           → Pour reprendre :               python main.py --reprendre")
+            print("           → Pour une nouvelle production : python main.py --idea \"...\"")
+            sys.exit(1)
     if not concept_initial and args.reprendre:
         # En reprise, on réutilise l'idée de la production interrompue
         concept_initial = str(state.get("idea", "")).strip()
@@ -328,6 +361,7 @@ def lancer_studio(argv=None):
         dossier_agents=AGENTS_DIR,
         surcharge_modele=args.model.strip() or None,
         reprendre=args.reprendre,
+        interactif=args.interactif,
     )
 
     try:
@@ -335,6 +369,10 @@ def lancer_studio(argv=None):
     except ErreurEtapeCritique:
         # L'orchestrateur a déjà tout affiché et sauvegardé l'état partiel.
         sys.exit(1)
+    except ArretUtilisateur:
+        # Arrêt volontaire à un point de validation : état déjà sauvegardé,
+        # reprise possible avec --reprendre. Ce n'est pas une erreur.
+        sys.exit(0)
 
     # ── 4. Récapitulatif final ───────────────────────────────────────────────
     _afficher_recap_final(state, bilan)
