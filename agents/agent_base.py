@@ -37,11 +37,27 @@ class BaseAgent:
         output_schema: Type[BaseModel],
         agent_id: str = "Agent",
     ):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
+        # Deux accès possibles à OpenAI, dans cet ordre de priorité :
+        #  1. Une clé PERSONNELLE (OPENAI_API_KEY) — dès qu'elle est définie,
+        #     elle l'emporte : il suffit de l'ajouter pour passer à son propre
+        #     compte, sans toucher au code.
+        #  2. L'accès GÉRÉ PAR REPLIT (intégration OpenAI) — proxy compatible
+        #     OpenAI, aucune clé à fournir, facturé sur les crédits Replit. Il
+        #     expose une URL de base + une clé technique dans l'environnement.
+        cle_perso = os.getenv("OPENAI_API_KEY")
+        base_url_replit = os.getenv("AI_INTEGRATIONS_OPENAI_BASE_URL")
+        cle_replit = os.getenv("AI_INTEGRATIONS_OPENAI_API_KEY")
+
+        if cle_perso:
+            api_key, base_url = cle_perso, None
+        elif base_url_replit and cle_replit:
+            api_key, base_url = cle_replit, base_url_replit
+        else:
             raise RuntimeError(
-                f"[{agent_id}] OPENAI_API_KEY manquante. "
-                "Copiez .env.example en .env et ajoutez votre clé OpenAI."
+                f"[{agent_id}] Aucun accès OpenAI configuré. Deux options : "
+                "l'accès géré par Replit (intégration OpenAI, aucune clé à "
+                "fournir) ou votre propre clé dans OPENAI_API_KEY "
+                "(voir .env.example)."
             )
 
         self.agent_id = agent_id
@@ -49,7 +65,10 @@ class BaseAgent:
         self.temperature = temperature
         self.output_schema = output_schema
 
-        self.llm = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
+        kwargs = {"model": model, "temperature": temperature, "api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        self.llm = ChatOpenAI(**kwargs)
 
         base_parser = PydanticOutputParser(pydantic_object=output_schema)
         self.parser = OutputFixingParser.from_llm(parser=base_parser, llm=self.llm)
