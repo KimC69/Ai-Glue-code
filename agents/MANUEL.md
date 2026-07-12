@@ -45,6 +45,8 @@ pour piloter, tracer et sécuriser ces productions :
 
 - un **orchestrateur** robuste (reprise après panne, retry, validation humaine) ;
 - un **worker distant** pour lancer les rendus lourds sur une autre machine ;
+- une **exécution locale automatique** (`--local`) : le studio lance lui-même
+  les logiciels installés sur cette machine (Csound pour la bande son, etc.) ;
 - un **journal** (base SQLite + logs JSONL) pour tracer chaque production ;
 - une **authentification** (comptes, rôles, jetons signés) ;
 - une **API HTTP** ;
@@ -284,12 +286,19 @@ Connectez-vous avec `alice`, lancez une production, suivez ses étapes.
 | `orchestrateur.py` | Moteur central. `Etape` décrit une étape ; `Orchestrateur` exécute la liste : **retry** (2 tentatives), **validation** des sorties, **criticité** (échec critique = arrêt propre + sauvegarde ; optionnel = on continue), **reprise** (`--reprendre`), **human-in-the-loop** (`--interactif`), **bilan** final, et **notification du journal**. |
 | `main.py` | Point d'entrée CLI. Construit le pipeline (les 8 `Etape`), crée le journal, gère toutes les options (`--idea`, `--model`, `--reprendre`, `--interactif`, `--worker`, `--historique`, gestion des comptes…) et délègue à l'orchestrateur. |
 
-### 8.3 L'exécution distante (rendus lourds)
+### 8.3 L'exécution des rendus (locale ou distante)
+
+Par défaut, les agents génèrent les scripts sans les exécuter. Deux options
+permettent de lancer les rendus automatiquement — **mutuellement exclusives** :
+`--local` (sur cette machine) ou `--worker` (sur une machine de rendu distante).
+Les deux réutilisent la même liste blanche d'outils, la même construction de
+commande (jamais par l'IA, jamais via un shell) et les mêmes garde-fous.
 
 | Fichier | Rôle détaillé |
 |---|---|
 | `worker_distant.py` | Serveur d'exécution à copier **sur la machine de rendu** (fichier autonome, stdlib pur). Reçoit un script + des fichiers, exécute Blender/Unreal/FFmpeg/Csound dans un dossier isolé, renvoie journaux et fichiers produits en flux. Protégé par jeton (`X-Jeton`). |
 | `client_worker.py` | Côté studio : client du worker + `ExecuteurDistant`, l'objet injecté comme « étape non-LLM » dans le pipeline pour piloter les rendus distants et rapatrier les résultats. |
+| `executeur_local.py` | Côté studio : `ExecuteurLocal` (option `--local`, stdlib pur), même interface que `ExecuteurDistant` mais exécute les rendus **sur cette machine** (headless). ⚠️ exécuter en local un script Blender/Unreal/FFmpeg généré par IA revient à exécuter du code arbitraire sur votre machine — Csound (synthèse musicale) est nettement moins risqué. |
 
 ### 8.4 L'observabilité
 

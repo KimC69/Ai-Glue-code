@@ -42,6 +42,8 @@ from dotenv import load_dotenv
 from shared_state import WorldState
 from orchestrateur import Etape, Orchestrateur, ErreurEtapeCritique, ArretUtilisateur
 from client_worker import ClientWorker, ExecuteurDistant, ErreurWorker
+from executeur_local import ExecuteurLocal
+from worker_distant import ConfigWorker, outils_disponibles
 from journal_production import JournalProduction
 from securite import Securite, ErreurSecurite, ROLES_VALIDES, ROLE_DEFAUT
 import utils_headless
@@ -117,7 +119,8 @@ def _enregistrer_son(state, agent, son):
 
 # ── Définition déclarative du pipeline ───────────────────────────────────────
 
-def construire_pipeline(executeur_distant=None, outils_worker=None) -> list:
+def construire_pipeline(executeur_distant=None, outils_worker=None,
+                        executeur_local=None, outils_local=None) -> list:
     """
     Décrit les étapes du studio. L'Orchestrateur se charge du reste.
 
@@ -125,6 +128,10 @@ def construire_pipeline(executeur_distant=None, outils_worker=None) -> list:
     (exécution des scripts Blender / Unreal / FFmpeg sur la machine de
     rendu) sont ajoutées à la suite — uniquement pour les outils que le
     worker déclare disponibles.
+
+    Si un exécuteur local est fourni (--local), ces mêmes rendus sont
+    exécutés AUTOMATIQUEMENT sur cette machine — pour les logiciels
+    installés localement. Les deux modes sont mutuellement exclusifs.
     """
     etapes = [
         Etape(
@@ -270,6 +277,9 @@ def construire_pipeline(executeur_distant=None, outils_worker=None) -> list:
     if executeur_distant is not None:
         etapes += etapes_rendu_distant(executeur_distant, outils_worker or {},
                                        prochain_numero=len(etapes) + 1)
+    if executeur_local is not None:
+        etapes += etapes_rendu_local(executeur_local, outils_local or {},
+                                     prochain_numero=len(etapes) + 1)
     return etapes
 
 
@@ -392,6 +402,99 @@ def etapes_rendu_distant(executeur, outils: dict, prochain_numero: int) -> list:
     return etapes
 
 
+# ── Étapes d'exécution locale automatique (--local) ──────────────────────────
+
+def etapes_rendu_local(executeur, outils: dict, prochain_numero: int) -> list:
+    """
+    Étapes 8+ : exécution AUTOMATIQUE des scripts générés, sur CETTE machine.
+    Le studio lance lui-même les logiciels (headless) et produit les fichiers,
+    sans intervention. Mêmes garanties que le rendu distant : toutes
+    optionnelles (critique=False) et en un seul essai.
+    """
+    etapes = []
+    conseil = ("Conseil : le journal complet est écrit dans "
+               "agents/output/rendus_local/ — il contient l'erreur exacte.")
+
+    def indisponible(outil):
+        print(f"[Avertissement] : « {outil} » n'est pas installé localement — "
+              "étape de rendu locale non planifiée.")
+
+    if outils.get("blender"):
+        etapes.append(Etape(
+            numero=prochain_numero + len(etapes),
+            nom="Rendu Blender (local)",
+            fichier="", classe="", methode="executer_blender",
+            fabrique=lambda: executeur,
+            preparer=lambda s: {"chemin_script": s.get("blender_saved_path")},
+            enregistrer=_enregistrer_rendu("blender"),
+            cles_sortie=("rendu_blender_statut",),
+            titre="RENDU BLENDER EXÉCUTÉ EN LOCAL",
+            afficher=_afficher_rendu,
+            critique=False, essais=1, conseil=conseil,
+            purger=_purger_rendu("blender"),
+        ))
+    else:
+        indisponible("blender")
+
+    if outils.get("unreal"):
+        etapes.append(Etape(
+            numero=prochain_numero + len(etapes),
+            nom="Setup Unreal (local)",
+            fichier="", classe="", methode="executer_unreal",
+            fabrique=lambda: executeur,
+            preparer=lambda s: {"chemin_script": s.get("unreal_saved_path")},
+            enregistrer=_enregistrer_rendu("unreal"),
+            cles_sortie=("rendu_unreal_statut",),
+            titre="SETUP UNREAL EXÉCUTÉ EN LOCAL",
+            afficher=_afficher_rendu,
+            critique=False, essais=1, conseil=conseil,
+            purger=_purger_rendu("unreal"),
+        ))
+    else:
+        indisponible("unreal")
+
+    if outils.get("ffmpeg"):
+        etapes.append(Etape(
+            numero=prochain_numero + len(etapes),
+            nom="Exports FFmpeg (local)",
+            fichier="", classe="", methode="executer_ffmpeg",
+            fabrique=lambda: executeur,
+            # Chaînage : l'export s'exécute dans le dossier du rendu Blender
+            # local (si effectué), où la vidéo master est disponible.
+            preparer=lambda s: {
+                "chemin_script": s.get("export_saved_path"),
+                "poursuivre_dossier": s.get("rendu_blender_fichiers", ""),
+            },
+            enregistrer=_enregistrer_rendu("ffmpeg"),
+            cles_sortie=("rendu_ffmpeg_statut",),
+            titre="EXPORTS FFMPEG EXÉCUTÉS EN LOCAL",
+            afficher=_afficher_rendu,
+            critique=False, essais=1, conseil=conseil,
+            purger=_purger_rendu("ffmpeg"),
+        ))
+    else:
+        indisponible("ffmpeg")
+
+    if outils.get("csound"):
+        etapes.append(Etape(
+            numero=prochain_numero + len(etapes),
+            nom="Rendu bande son (local)",
+            fichier="", classe="", methode="executer_csound",
+            fabrique=lambda: executeur,
+            preparer=lambda s: {"chemin_script": s.get("sound_saved_path")},
+            enregistrer=_enregistrer_rendu("csound"),
+            cles_sortie=("rendu_csound_statut",),
+            titre="BANDE SON RENDUE EN LOCAL",
+            afficher=_afficher_rendu,
+            critique=False, essais=1, conseil=conseil,
+            purger=_purger_rendu("csound"),
+        ))
+    else:
+        indisponible("csound")
+
+    return etapes
+
+
 # ── Récapitulatif final et commandes headless ────────────────────────────────
 
 def _ecrire_notes_si_necessaire(actif, contenu: str, nom_fichier: str) -> str:
@@ -437,7 +540,7 @@ def _afficher_recap_final(state: WorldState, bilan: dict) -> None:
                ("ffmpeg", "Exports FFmpeg"), ("csound", "Rendu bande son"))
               if state.get(f"rendu_{prefixe}_statut") == "ok"]
     if rendus:
-        print("\n  ▶ RENDUS EXÉCUTÉS SUR LE WORKER DISTANT :")
+        print("\n  ▶ RENDUS EXÉCUTÉS AUTOMATIQUEMENT (worker distant ou local) :")
         for prefixe, label in rendus:
             print(f"    ✅ {label}")
             print(f"       Journal  : {state.get(f'rendu_{prefixe}_journal')}")
@@ -476,6 +579,8 @@ def _mode_execution(args) -> str:
         modes.append("interactif")
     if args.worker:
         modes.append("worker")
+    if args.local:
+        modes.append("local")
     if args.reprendre:
         modes.append("reprise")
     return "+".join(modes) or "standard"
@@ -630,6 +735,12 @@ def lancer_studio(argv=None):
     parser.add_argument("--worker-jeton", type=str, default="",
                         help="Jeton d'accès au worker (sinon : variable WORKER_JETON, "
                              "affiché par le worker à son démarrage)")
+    parser.add_argument("--local", action="store_true",
+                        help="Lance les rendus AUTOMATIQUEMENT sur cette machine "
+                             "(headless), pour les logiciels installés localement : "
+                             "Csound (bande son), et Blender/FFmpeg si présents. "
+                             "⚠️ exécute des scripts générés par IA sur votre machine "
+                             "— incompatible avec --worker.")
     parser.add_argument("--historique", action="store_true",
                         help="Affiche l'historique des productions (base output/studio.db) "
                              "puis quitte, sans rien lancer")
@@ -692,6 +803,12 @@ def lancer_studio(argv=None):
         print("[Avertissement] : --interactif sans terminal interactif — "
               "les validations seront acceptées automatiquement.")
 
+    # ── Rendu local OU distant, jamais les deux ──────────────────────────────
+    if args.local and args.worker:
+        print("[Erreur] : --local et --worker sont incompatibles (rendu local "
+              "OU sur machine distante, pas les deux).")
+        sys.exit(1)
+
     # ── 0. Connexion au worker distant (si demandé) ──────────────────────────
     # Vérifiée AVANT de lancer le pipeline : inutile de consommer des appels
     # LLM si la machine de rendu est injoignable.
@@ -716,6 +833,20 @@ def lancer_studio(argv=None):
         disponibles = [o for o, ok in outils_worker.items() if ok]
         print(f"[Système] : Worker connecté ({args.worker}) — outils disponibles : "
               + (", ".join(disponibles) if disponibles else "aucun"))
+
+    # ── 0bis. Exécution locale automatique (--local) ─────────────────────────
+    # Le studio lance lui-même les logiciels installés sur cette machine.
+    executeur_local = None
+    outils_local: dict = {}
+    if args.local:
+        outils_local = outils_disponibles(ConfigWorker())
+        executeur_local = ExecuteurLocal(
+            dossier_rendus=os.path.join(OUTPUT_DIR, "rendus_local"))
+        disponibles = [o for o, ok in outils_local.items() if ok]
+        print("[Système] : Rendu LOCAL activé — le studio lancera lui-même : "
+              + (", ".join(disponibles) if disponibles else "aucun outil détecté"))
+        print("            ⚠️  Rappel : les scripts exécutés (Blender/Unreal/FFmpeg) "
+              "sont générés par IA et tournent sur cette machine.")
 
     # ── 1. Initialisation de la mémoire commune ──────────────────────────────
     # L'état précédent n'est rechargé qu'en mode --reprendre : une nouvelle
@@ -782,7 +913,8 @@ def lancer_studio(argv=None):
     # ── 4. Exécution du pipeline par l'orchestrateur central ────────────────
     orchestrateur = Orchestrateur(
         state=state,
-        etapes=construire_pipeline(executeur_distant, outils_worker),
+        etapes=construire_pipeline(executeur_distant, outils_worker,
+                                   executeur_local, outils_local),
         dossier_agents=AGENTS_DIR,
         surcharge_modele=args.model.strip() or None,
         reprendre=args.reprendre,

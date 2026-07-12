@@ -81,6 +81,9 @@ python main.py --interactif
 
 # Exécuter Blender / Unreal / FFmpeg sur une machine de rendu distante
 python main.py --reprendre --worker http://192.168.1.50:8765 --worker-jeton JETON
+
+# Laisser le studio lancer LUI-MÊME les rendus sur CETTE machine (headless)
+python main.py --reprendre --local
 ```
 
 En cas d'échec d'une étape critique (Agents 01 à 05), l'état partiel est
@@ -108,6 +111,36 @@ Les directives de révision s'accumulent (l'agent voit toutes vos remarques
 précédentes) et une révision qui échoue ne casse rien : le résultat précédent
 reste en vigueur. Sans terminal interactif (pipe, CI), les validations sont
 acceptées automatiquement.
+
+### Exécution locale automatique (`--local`)
+
+Par défaut, les agents *génèrent* les scripts sans jamais les exécuter :
+c'est à vous (ou au worker distant) de lancer les rendus. Avec `--local`, le
+studio lance lui-même les logiciels installés sur cette machine, en mode
+headless — l'agent « ouvre » réellement le logiciel et produit le fichier
+final, sans intervention :
+
+```bash
+# Produire d'abord, puis laisser le studio rendre tout seul
+python main.py --idea "..."
+python main.py --reprendre --local
+```
+
+Les mêmes étapes optionnelles que le worker s'ajoutent, mais seulement pour
+les outils réellement installés ici (détectés via `which`) : le cas d'usage
+principal est **Csound** pour la bande son (`bande_son.csd` → `bande_son.wav`),
+et Blender/FFmpeg s'ils sont présents. Les fichiers et journaux atterrissent
+dans `agents/output/rendus_local/<outil>/`. Un rendu qui échoue n'invalide
+jamais la production (journal complet conservé pour diagnostic).
+
+> ⚠️ **Sécurité — à comprendre avant d'utiliser `--local`.** Exécuter en
+> local un script Blender (`.py`) ou Unreal/FFmpeg (`.sh`) *généré par IA*,
+> c'est exécuter du code arbitraire sur votre propre machine. Csound (`.csd`,
+> langage de synthèse musicale) est nettement moins risqué. Les mêmes
+> garde-fous que le worker s'appliquent : liste blanche stricte des outils,
+> commande construite par le studio (jamais par l'IA) et exécutée sans shell,
+> nom de fichier assaini, dossier isolé, délai maximal. `--local` et
+> `--worker` sont mutuellement exclusifs.
 
 ### Exécution distante sur un worker (`--worker`)
 
@@ -334,6 +367,7 @@ complète et les limites (les fonctions qui exigeront de nouveaux points d'API).
 | `utils_headless.py` | Génère les commandes headless (Blender, Unreal, GIMP, montage, export FFmpeg, bande son Csound) prêtes à copier-coller |
 | `worker_distant.py` | Serveur d'exécution distant (stdlib pur, fichier autonome) — à lancer sur la machine de rendu ; API HTTP protégée par jeton |
 | `client_worker.py` | Client du worker + `ExecuteurDistant` branché dans le pipeline (étapes de rendu distantes, rapatriement journaux/fichiers) |
+| `executeur_local.py` | `ExecuteurLocal` (option `--local`, stdlib pur) — lance les rendus automatiquement sur cette machine, mêmes garde-fous et même liste blanche que le worker |
 | `orchestrateur.py` | Moteur d'exécution central — `Etape` (description déclarative) + `Orchestrateur` (retry, validation des sorties, reprise `--reprendre`, bilan, notification du journal) |
 | `journal_production.py` | Journal de production (stdlib pur) — base SQLite `output/studio.db` (historique interrogeable) + logs structurés JSONL `output/journaux/<id>.jsonl` ; mode dégradé si l'écriture échoue |
 | `securite.py` | Fondation d'authentification (stdlib pur) — comptes + mots de passe hachés (pbkdf2), rôles/permissions, jetons de session signés (base `output/securite.db`) ; échoue fermé |

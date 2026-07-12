@@ -108,6 +108,23 @@ def outils_disponibles(config: ConfigWorker) -> dict:
     }
 
 
+def nom_script_securise(outil: str, nom_brut: str, identifiant: str) -> str:
+    """Nom de fichier sûr pour un script reçu (anti-traversée de répertoire).
+
+    Ne garde que le basename, remplace tout caractère non
+    alphanumérique/._- , force une extension selon l'outil, puis préfixe par
+    l'identifiant du travail. Source unique partagée par le worker distant et
+    l'exécuteur local pour garantir le même comportement de sécurité.
+    """
+    nom = re.sub(r"[^A-Za-z0-9._-]", "_",
+                 os.path.basename(str(nom_brut))).strip("._")
+    if not nom:
+        nom = "script"
+    if "." not in nom:
+        nom += {"blender": ".py", "csound": ".csd"}.get(outil, ".sh")
+    return f"script_{identifiant}_{nom}"
+
+
 def construire_commande(config: ConfigWorker, travail: Travail) -> list:
     """Commande d'exécution du script selon l'outil (liste blanche stricte)."""
     script = os.path.join(travail.dossier, travail.nom_script)
@@ -348,13 +365,7 @@ class RequeteWorker(BaseHTTPRequestHandler):
             dossier = os.path.join(self.config.dossier, identifiant)
             os.makedirs(dossier, exist_ok=True)
 
-        nom = re.sub(r"[^A-Za-z0-9._-]", "_",
-                     os.path.basename(str(corps.get("nom_script", "")))).strip("._")
-        if not nom:
-            nom = "script"
-        if "." not in nom:
-            nom += {"blender": ".py", "csound": ".csd"}.get(outil, ".sh")
-        nom_script = f"script_{identifiant}_{nom}"
+        nom_script = nom_script_securise(outil, corps.get("nom_script", ""), identifiant)
         with open(os.path.join(dossier, nom_script), "w", encoding="utf-8") as f:
             f.write(script)
 
