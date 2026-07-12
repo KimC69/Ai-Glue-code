@@ -284,7 +284,7 @@ Connectez-vous avec `alice`, lancez une production, suivez ses étapes.
 | Fichier | Rôle détaillé |
 |---|---|
 | `orchestrateur.py` | Moteur central. `Etape` décrit une étape ; `Orchestrateur` exécute la liste : **retry** (2 tentatives), **validation** des sorties, **criticité** (échec critique = arrêt propre + sauvegarde ; optionnel = on continue), **reprise** (`--reprendre`), **human-in-the-loop** (`--interactif`), **bilan** final, et **notification du journal**. |
-| `main.py` | Point d'entrée CLI. Construit le pipeline (les 8 `Etape`), crée le journal, gère toutes les options (`--idea`, `--model`, `--reprendre`, `--interactif`, `--worker`, `--historique`, gestion des comptes…) et délègue à l'orchestrateur. |
+| `main.py` | Point d'entrée CLI. Construit le pipeline (les 8 `Etape`), crée le journal, gère toutes les options (`--idea`, `--model`, `--reprendre`, `--interactif`, `--worker`, `--historique`, `--projet`, `--inspiration`/`--suite-de`, `--lister-projets`, gestion des comptes…) et délègue à l'orchestrateur. |
 
 ### 8.3 L'exécution des rendus (locale ou distante)
 
@@ -345,7 +345,8 @@ Toutes les routes (sauf `/sante` et `/connexion`) exigent l'en-tête
 | `POST /deconnexion` | jeton valide | révoque le jeton présenté |
 | `GET /productions` | `consulter` | `{productions:[{..., etapes_reussies}]}` |
 | `GET /productions/<id>` | `consulter` | `{production, etapes:[...], evenements:[...]}` ou `404` |
-| `POST /productions` | `lancer_production` | `{idee, modele?}` → `202 {id, statut, suivi}` |
+| `GET /projets` | `consulter` | `{projets:[{slug, nom, cree_le, a_un_etat}]}` |
+| `POST /productions` | `lancer_production` | `{idee, modele?, projet?, inspiration?}` → `202 {id, statut, suivi}` ; `404` si `inspiration` introuvable, `400` si `inspiration` invalide |
 | `POST /productions/<id>/pause` | `piloter_production` | met la production en pause (effet fin d'étape) |
 | `POST /productions/<id>/reprendre` | `piloter_production` | reprend une production en pause |
 | `POST /productions/<id>/arreter` | `piloter_production` | arrêt propre ; reprise possible via `--reprendre` |
@@ -382,6 +383,20 @@ persistante injectée au Directeur Créatif au lancement de chaque **nouvelle**
 production. La *mémoire de travail* est le `world_state` de la dernière
 production : `GET /memoire` en donne un résumé (clés remplies, valeurs longues
 tronquées) et `POST /memoire/reset` l'efface (refusé tant qu'une prod tourne).
+
+**Projets & suites.** Un *projet* (`--projet "Nom"` en CLI, champ `projet` sur
+`POST /productions`) range un film dans son propre dossier
+`output/projets/<slug>/` : scripts générés (via `STUDIO_OUTPUT_DIR` lu par
+`shared_state.dossier_sortie()`), `meta.json` et `world_state.json` archivé en
+fin de production (écrit depuis l'état **en mémoire** de la production, pour
+rester correct même si plusieurs productions tournent en parallèle). Écrire une
+*suite* se fait avec `--inspiration "Projet source"` (champ `inspiration`) : on
+lit le `world_state.json` archivé du projet source, on en tire un bloc RÉFÉRENCE
+(clés créatives : synopsis, personnages, style… ; scripts techniques exclus) et
+on l'injecte à l'Agent 01. **Échoue fermé** : projet source absent ou sans état
+→ refus explicite (`404`/erreur CLI), jamais de fausse suite ; incompatible avec
+`--reprendre`. `world_state` global (`output/world_state.json`) reste inchangé,
+donc `/memoire` continue de fonctionner comme avant.
 
 Exemple complet :
 

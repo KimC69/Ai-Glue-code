@@ -211,7 +211,33 @@ supports complémentaires :
 
 ```bash
 python main.py --historique          # liste les dernières productions puis quitte
+python main.py --lister-projets      # liste les projets (films/séries) puis quitte
 ```
+
+### Dossiers par projet et écriture d'une suite
+
+Par défaut, tout va dans `output/`. L'option `--projet` range plutôt le film
+dans son **propre dossier** `output/projets/<nom>/` : scripts générés,
+`meta.json` (nom, dates) et `world_state.json` (la « bible » créative archivée en
+fin de production). Le reste (historique `studio.db`, comptes, objectifs, canal
+de pilotage) demeure partagé.
+
+Pour écrire une **suite**, `--inspiration` (alias `--suite-de`) réutilise l'état
+archivé d'un projet existant comme référence (univers, personnages, ton) injectée
+aux agents :
+
+```bash
+# Saison 1 — rangée dans son propre dossier
+python main.py --projet "Alien" --idea "Un équipage réveillé face à une créature"
+
+# Saison 2 — inspirée de la saison 1
+python main.py --projet "Alien 2" --inspiration "Alien" \
+  --idea "Cinquante ans plus tard, une colonie perd le contact"
+```
+
+`--inspiration` **échoue franchement** si le projet source est absent ou n'a pas
+encore d'état créatif (on ne produit jamais une fausse « suite »), et il est
+incompatible avec `--reprendre`.
 
 Une reprise (`--reprendre`) réutilise le même identifiant de production : ses
 nouvelles étapes s'ajoutent à l'historique existant au lieu d'en créer un
@@ -271,7 +297,8 @@ python api_serveur.py --hote 0.0.0.0 --port 8000
 | `POST /deconnexion` | jeton valide | Révoque le jeton présenté |
 | `GET /productions` | `consulter` | Historique des productions |
 | `GET /productions/<id>` | `consulter` | Détail : étapes + événements |
-| `POST /productions` | `lancer_production` | `{idee, modele?}` → `202 {id}` |
+| `GET /projets` | `consulter` | Liste des projets (films/séries) + état archivé |
+| `POST /productions` | `lancer_production` | `{idee, modele?, projet?, inspiration?}` → `202 {id}` (`404` si `inspiration` introuvable) |
 | `POST /productions/<id>/pause` | `piloter_production` | Mettre en pause à distance |
 | `POST /productions/<id>/reprendre` | `piloter_production` | Reprendre une production en pause |
 | `POST /productions/<id>/arreter` | `piloter_production` | Arrêter proprement (reprise possible via `--reprendre`) |

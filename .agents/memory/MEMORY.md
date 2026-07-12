@@ -1,3 +1,4 @@
 - [Architecture des agents](agent-architecture.md) — BaseAgent, pipeline déclaratif (retry/reprise/HITL), worker distant HTTP stdlib, journal SQLite+JSONL.
 - [Feuille de route](feuille-de-route.md) — 10 étapes ; 1–5 faites, reste 6=sécurité, 7=API, 8=web, 9=Android, 10=desktop. L'utilisateur annonce chaque étape.
 - [Contrôle inter-processus](controle-inter-processus.md) — pilotage prod détachée par fichier de commande ; écriture échoue-fermé (tmp uuid), lecture échoue-sûr, pause = reprendre explicite, garde-fous DESTRUCTIFS échouent-fermé.
+- [Dossiers par projet + suite](dossiers-par-projet.md) — film isolé dans output/projets/<slug>/ ; scripts via STUDIO_OUTPUT_DIR/dossier_sortie() ; archive depuis état EN MÉMOIRE (pas le fichier global) ; suite = référence injectée, échoue-fermé.

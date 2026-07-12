@@ -8,7 +8,7 @@ import os
 import re
 from langchain_core.exceptions import OutputParserException
 from agent_base import BaseAgent
-from shared_state import ArtDirectorOutput
+from shared_state import ArtDirectorOutput, dossier_sortie
 
 
 SYSTEM_PROMPT = """Tu es un Directeur Artistique et expert Blender Python (bpy).
@@ -143,7 +143,7 @@ class DirecteurArtistique(BaseAgent):
 
     def _sauvegarder(self, filename: str, code: str) -> str:
         """Sauvegarde le script Blender dans agents/output/ de façon sécurisée."""
-        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+        output_dir = dossier_sortie()
         os.makedirs(output_dir, exist_ok=True)
 
         safe_filename = _securiser_nom_fichier(filename)

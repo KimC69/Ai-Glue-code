@@ -11,7 +11,7 @@ cet agent de trancher, pas une étape systématique du pipeline.
 import os
 from langchain_core.exceptions import OutputParserException
 from agent_base import BaseAgent
-from shared_state import PostProductionOutput
+from shared_state import PostProductionOutput, dossier_sortie
 
 
 SYSTEM_PROMPT = """Tu es le Superviseur Post-Production d'un studio de cinéma virtuel.
@@ -192,7 +192,7 @@ class SuperviseurPostProduction(BaseAgent):
         """Sauvegarde un script généré (GIMP, Krita, ...) dans agents/output/.
         Le nom de fichier est fixe (défini en interne, jamais fourni par le LLM),
         donc aucun risque de traversal de répertoire."""
-        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+        output_dir = dossier_sortie()
         os.makedirs(output_dir, exist_ok=True)
 
         filepath = os.path.join(output_dir, filename)

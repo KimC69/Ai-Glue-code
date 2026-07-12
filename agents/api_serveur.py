@@ -54,6 +54,7 @@ from controle_production import ecrire_commande
 import config_agents
 import chat_agents
 import memoire
+import projets
 
 VERSION = "1.0"
 DOSSIER_DEFAUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -303,6 +304,13 @@ class RequeteAPI(BaseHTTPRequestHandler):
                 "objectifs": memoire.lire_objectifs(self.config.dossier),
                 "etat": memoire.resume_world_state(self.config.dossier)})
 
+        # /projets : liste des projets (films/séries) avec leur état (consulter).
+        if self.path == "/projets":
+            if self._exiger("consulter") is None:
+                return
+            return self._json(200, {
+                "projets": projets.lister_projets(self.config.dossier)})
+
         # Interface mobile (PWA) : fichiers statiques publics (/, /app.js, …).
         if self._servir_statique():
             return
@@ -387,10 +395,26 @@ class RequeteAPI(BaseHTTPRequestHandler):
         if not idee:
             return self._erreur(400, "le champ « idee » est obligatoire")
         modele = str(corps.get("modele", "")).strip()
+        projet = str(corps.get("projet", "")).strip()
+        inspiration = str(corps.get("inspiration", "")).strip()
+
+        # Écrire une suite : le projet source doit exister, sinon on refuse tout
+        # de suite (404) plutôt que de lancer une production qui échouera seule
+        # dans son sous-processus.
+        if inspiration:
+            try:
+                slug_source = projets.slugifier(inspiration)
+            except ValueError:
+                return self._erreur(400, "le champ « inspiration » est invalide")
+            if not projets.projet_existe(slug_source, self.config.dossier):
+                return self._erreur(
+                    404, f"projet source « {inspiration} » introuvable : "
+                         "impossible d'en écrire une suite.")
 
         production_id = _nouvel_id()
         try:
-            demarrer_production_en_fond(self.config, production_id, idee, modele)
+            demarrer_production_en_fond(self.config, production_id, idee, modele,
+                                        projet, inspiration)
         except OSError as e:
             # Échec du lancement du sous-processus (interpréteur/main.py
             # introuvable) : on le signale clairement plutôt que par une 500.
@@ -537,18 +561,27 @@ def _nouvel_id() -> str:
 
 
 def commande_lancement(config: ConfigAPI, production_id: str, idee: str,
-                       modele: str = "") -> list:
+                       modele: str = "", projet: str = "",
+                       inspiration: str = "") -> list:
     """Construit la ligne de commande du sous-processus de production. Isolée
-    (et sans effet de bord) pour être testable sans rien exécuter."""
+    (et sans effet de bord) pour être testable sans rien exécuter.
+
+    `projet` range le film dans son propre dossier ; `inspiration` désigne un
+    projet existant dont l'univers sert de référence pour écrire une suite."""
     commande = [config.python, config.main_script,
                 "--idea", idee, "--production-id", production_id]
     if modele:
         commande += ["--model", modele]
+    if projet:
+        commande += ["--projet", projet]
+    if inspiration:
+        commande += ["--inspiration", inspiration]
     return commande
 
 
 def demarrer_production_en_fond(config: ConfigAPI, production_id: str,
-                                idee: str, modele: str = "") -> "subprocess.Popen":
+                                idee: str, modele: str = "", projet: str = "",
+                                inspiration: str = "") -> "subprocess.Popen":
     """Démarre le pipeline dans un sous-processus détaché et rend la main
     immédiatement (on N'ATTEND PAS la fin — une production dure plusieurs
     minutes). La sortie du sous-processus est redirigée vers un fichier de log
@@ -559,7 +592,8 @@ def demarrer_production_en_fond(config: ConfigAPI, production_id: str,
     os.makedirs(dossier_logs, exist_ok=True)
     chemin_log = os.path.join(dossier_logs, f"{production_id}.log")
     sortie = open(chemin_log, "w", encoding="utf-8")
-    commande = commande_lancement(config, production_id, idee, modele)
+    commande = commande_lancement(config, production_id, idee, modele,
+                                  projet, inspiration)
     try:
         return subprocess.Popen(
             commande, stdin=subprocess.DEVNULL, stdout=sortie,

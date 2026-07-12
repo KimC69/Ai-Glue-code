@@ -49,6 +49,7 @@ from securite import Securite, ErreurSecurite, ROLES_VALIDES, ROLE_DEFAUT
 from controle_production import Controleur
 import config_agents
 import memoire
+import projets
 import utils_headless
 
 # Chargement des variables d'environnement (.env)
@@ -123,15 +124,23 @@ def _enregistrer_son(state, agent, son):
 # ── Définition déclarative du pipeline ───────────────────────────────────────
 
 def _idee_avec_objectifs(state) -> str:
-    """Idée transmise au Directeur Créatif, enrichie des objectifs persistants
-    du producteur s'il en a défini (voir memoire.py). Ainsi une ligne éditoriale
-    durable oriente chaque nouvelle production sans avoir à la retaper."""
-    idee = str(state.get("idea", ""))
+    """Idée transmise au Directeur Créatif, enrichie de deux contextes durables :
+    la RÉFÉRENCE d'un projet précédent (mode suite : univers/personnages/ton à
+    faire évoluer) puis les OBJECTIFS persistants du producteur (ligne
+    éditoriale). Ainsi une suite reste cohérente et la ligne éditoriale oriente
+    chaque production sans avoir à la retaper."""
+    parties = [str(state.get("idea", ""))]
+    reference = str(state.get("reference_projet", "")).strip()
+    if reference:
+        parties.append(
+            "[RÉFÉRENCE — CE FILM EST UNE SUITE. Univers, personnages et ton du "
+            "projet précédent, à respecter et à faire évoluer]\n" + reference)
     objectifs = str(state.get("objectifs_producteur", "")).strip()
-    if not objectifs:
-        return idee
-    return (idee + "\n\n[OBJECTIFS PERSISTANTS DU PRODUCTEUR — à respecter "
-            "dans toute la production]\n" + objectifs)
+    if objectifs:
+        parties.append(
+            "[OBJECTIFS PERSISTANTS DU PRODUCTEUR — à respecter dans toute la "
+            "production]\n" + objectifs)
+    return "\n\n".join(parties)
 
 
 def construire_pipeline(executeur_distant=None, outils_worker=None,
@@ -542,7 +551,7 @@ def _afficher_recap_final(state: WorldState, bilan: dict) -> None:
     print("  🎬 PIPELINE COMPLET — PRODUCTION TERMINÉE")
     print("=" * 45)
     print(f"  État complet     : {WorldState.SAVE_PATH}")
-    print(f"  Scripts générés  : agents/output/")
+    print(f"  Scripts générés  : {OUTPUT_DIR}")
     print(f"  Étapes réussies  : {len(bilan['reussies'])}"
           + (f" | ignorées (reprise) : {len(bilan['ignorees'])}" if bilan["ignorees"] else "")
           + (f" | échouées (optionnelles) : {len(bilan['echouees'])}" if bilan["echouees"] else ""))
@@ -632,6 +641,8 @@ def _afficher_historique(limite: int = 20) -> None:
                    "arretee": "⏸️ ", "en_cours": "⏳"}.get(p["statut"], "•")
         print(f"\n  {symbole} {p['id']}  ({p['statut']})")
         print(f"     Idée    : {idee}")
+        if p.get("projet"):
+            print(f"     Projet  : {p['projet']}")
         print(f"     Étapes  : {p['etapes_reussies']} réussie(s)"
               f"   |   Modèle : {p['modele'] or '—'}   |   Mode : {p['mode'] or '—'}")
         print(f"     Démarrée: {p['demarree_le']}"
@@ -735,9 +746,51 @@ def _afficher_utilisateurs(utilisateurs: list) -> None:
     print("═" * 60 + "\n")
 
 
+def _afficher_projets() -> None:
+    """Liste les projets existants (dossiers output/projets/<slug>/)."""
+    liste = projets.lister_projets()
+    print("\n" + "═" * 68)
+    print("  🎬  PROJETS")
+    print("═" * 68)
+    if not liste:
+        print("  (aucun projet pour l'instant)")
+        print("  Créez-en un :  python main.py --projet \"Alien\" --idea \"...\"")
+        print("═" * 68 + "\n")
+        return
+    for p in liste:
+        etat = "état archivé ✓" if p["a_un_etat"] else "pas encore d'état"
+        print(f"\n  • {p['nom']}   (slug : {p['slug']})")
+        print(f"     {etat}   |   créé le {p.get('cree_le') or '—'}")
+    print("\n  Écrire une suite :")
+    print("    python main.py --projet \"Alien 2\" --inspiration \"Alien\" "
+          "--idea \"...\"")
+    print("═" * 68 + "\n")
+
+
+def _archiver_projet(projet_courant: dict, production_id: str, state) -> None:
+    """Archive l'état de CETTE production dans le dossier du projet (source
+    d'une future suite). On archive l'état EN MÉMOIRE (state.to_dict()), et non
+    le fichier global world_state.json : ainsi deux productions simultanées ne
+    risquent pas d'archiver l'état l'une de l'autre.
+
+    Best-effort assumé : la production est DÉJÀ terminée, on ne la fait pas
+    échouer a posteriori si l'archive rate — on avertit clairement. (La fonction
+    sous-jacente reste « échoue fermé » et lève ; c'est ICI qu'on choisit de
+    dégrader pour ne pas masquer le vrai résultat de la production.)"""
+    try:
+        chemin = projets.archiver_etat(projet_courant["slug"], state.to_dict())
+        projets.enregistrer_production(projet_courant["slug"], production_id)
+        print(f"[Système] : État archivé dans le projet → {chemin}")
+    except OSError as e:
+        print(f"[Avertissement] : archivage du projet impossible ({e}).")
+
+
 # ── Point d'entrée ────────────────────────────────────────────────────────────
 
 def lancer_studio(argv=None):
+    # --projet redirige les sorties (scripts, notes, rendus) vers le dossier du
+    # projet ; on réaffecte donc la variable de module OUTPUT_DIR.
+    global OUTPUT_DIR
     parser = argparse.ArgumentParser(
         description="Studio IA Cinématographique — pipeline multi-agents "
                     "(vision → scénario → Blender → Unreal → post-prod → exports).")
@@ -773,6 +826,19 @@ def lancer_studio(argv=None):
                              "hexadécimaux). Utilisé par l'API (étape 7) : elle génère "
                              "l'identifiant, le renvoie au client, puis lance le pipeline "
                              "avec cette option pour que le suivi retrouve la production")
+    parser.add_argument("--projet", type=str, default="", metavar="NOM",
+                        help="Range le film dans son PROPRE dossier "
+                             "output/projets/<nom>/ (état archivé, scripts, meta). "
+                             "Sans cette option, tout va dans output/ (comportement "
+                             "historique).")
+    parser.add_argument("--inspiration", "--suite-de", dest="inspiration",
+                        type=str, default="", metavar="PROJET",
+                        help="Écrit une SUITE : s'inspire de l'état d'un projet "
+                             "existant (son univers/ses personnages sont injectés "
+                             "en référence). Ex. : --projet \"Alien 2\" "
+                             "--inspiration \"Alien\"")
+    parser.add_argument("--lister-projets", action="store_true",
+                        help="Affiche la liste des projets puis quitte")
 
     # ── Gestion des comptes (authentification, étape 6) ──────────────────────
     # Ces commandes s'exécutent puis quittent, sans lancer de production. Les
@@ -807,6 +873,11 @@ def lancer_studio(argv=None):
         _afficher_historique()
         return
 
+    # ── Liste des projets : lecture seule, aucune production lancée ───────────
+    if args.lister_projets:
+        _afficher_projets()
+        return
+
     # ── Commandes de gestion des comptes : s'exécutent puis quittent ─────────
     if _gerer_securite(args):
         return
@@ -822,6 +893,45 @@ def lancer_studio(argv=None):
             print("[Erreur] : --production-id doit comporter 12 caractères "
                   "hexadécimaux (0-9, a-f).")
             sys.exit(1)
+
+    # ── Projet : dossier propre au film (état archivé, scripts, meta) ────────
+    # Sans --projet, tout reste dans output/ (comportement historique).
+    projet_courant = None
+    if args.projet:
+        try:
+            projet_courant = projets.creer_ou_ouvrir(args.projet)
+        except (ValueError, OSError) as e:
+            print(f"[Erreur] : projet impossible à créer : {e}")
+            sys.exit(1)
+        OUTPUT_DIR = projet_courant["chemin"]
+        # Les agents (Blender/Unreal/FFmpeg/Csound) lisent ce chemin via
+        # shared_state.dossier_sortie() pour y ranger leurs scripts générés.
+        os.environ["STUDIO_OUTPUT_DIR"] = OUTPUT_DIR
+        print(f"[Système] : Projet « {projet_courant['nom']} » — "
+              f"sorties dans {OUTPUT_DIR}")
+
+    # ── Suite / inspiration : réutiliser l'état d'un projet existant ─────────
+    reference_texte = ""
+    if args.inspiration:
+        if args.reprendre:
+            print("[Erreur] : --inspiration (écrire une suite) et --reprendre "
+                  "(continuer une production) sont incompatibles.")
+            sys.exit(1)
+        try:
+            slug_source = projets.slugifier(args.inspiration)
+        except ValueError as e:
+            print(f"[Erreur] : --inspiration invalide : {e}")
+            sys.exit(1)
+        if not projets.projet_existe(slug_source):
+            print(f"[Erreur] : projet source « {args.inspiration} » introuvable.")
+            print("           Projets : python main.py --lister-projets")
+            sys.exit(1)
+        reference_texte = projets.resume_reference(slug_source)
+        if not reference_texte:
+            print(f"[Erreur] : le projet « {args.inspiration} » n'a pas encore "
+                  "d'état créatif à réutiliser (aucune production aboutie ?).")
+            sys.exit(1)
+        print(f"[Système] : Suite inspirée du projet « {args.inspiration} ».")
 
     if args.interactif and not sys.stdin.isatty():
         print("[Avertissement] : --interactif sans terminal interactif — "
@@ -914,6 +1024,11 @@ def lancer_studio(argv=None):
 
     state.update("idea", concept_initial)
 
+    # Référence d'un projet précédent (mode suite) : injectée avec l'idée au
+    # Directeur Créatif, puis disponible pour toute la chaîne via l'état.
+    if reference_texte:
+        state.update("reference_projet", reference_texte)
+
     # Objectifs persistants du producteur : injectés dans une NOUVELLE production
     # (le Directeur Créatif les reçoit avec l'idée). En reprise, l'étape 1 est
     # déjà faite : les objectifs restent ceux de la production d'origine.
@@ -940,7 +1055,8 @@ def lancer_studio(argv=None):
     journal.demarrer_production(
         idee=concept_initial,
         modele=args.model.strip() or "défaut",
-        mode=_mode_execution(args))
+        mode=_mode_execution(args),
+        projet=projet_courant["slug"] if projet_courant else "")
 
     # ── 4. Exécution du pipeline par l'orchestrateur central ────────────────
     # Canal de pilotage à distance (pause / reprise / arrêt) : l'orchestrateur le
@@ -987,6 +1103,10 @@ def lancer_studio(argv=None):
         # La production est finie (succès, échec ou arrêt) : toute commande de
         # pilotage résiduelle n'a plus de sens — on nettoie le canal.
         controle.effacer()
+        # Archive de l'état dans le dossier du projet (si --projet) : c'est ce
+        # que réutilisera une future suite.
+        if projet_courant:
+            _archiver_projet(projet_courant, production_id, state)
 
     # ── 5. Récapitulatif final ───────────────────────────────────────────────
     _afficher_recap_final(state, bilan)

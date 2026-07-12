@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS productions (
     idee        TEXT NOT NULL,
     modele      TEXT,
     mode        TEXT,
+    projet      TEXT,                          -- slug du projet (film/série), ou NULL
     statut      TEXT NOT NULL DEFAULT 'en_cours',
     demarree_le TEXT NOT NULL,
     terminee_le TEXT
@@ -115,8 +116,21 @@ class JournalProduction:
             self._connexion.execute("PRAGMA busy_timeout=5000")
             self._connexion.executescript(SCHEMA)
             self._connexion.commit()
+            self._migrer_schema()
         except (sqlite3.Error, OSError) as e:
             self._passer_en_degrade(e)
+
+    def _migrer_schema(self) -> None:
+        """Ajoute les colonnes manquantes aux bases créées par une version
+        antérieure : `CREATE TABLE IF NOT EXISTS` ne modifie pas une table qui
+        existe déjà. Idempotent et « échoue sûr » (une base ancienne continue de
+        fonctionner même si la migration n'aboutit pas)."""
+        curseur = self._executer("PRAGMA table_info(productions)")
+        if not curseur:
+            return
+        colonnes = {ligne[1] for ligne in curseur.fetchall()}
+        if "projet" not in colonnes:
+            self._executer("ALTER TABLE productions ADD COLUMN projet TEXT")
 
     # ── Écriture bas niveau (défensive) ───────────────────────────────────────
 
@@ -212,21 +226,25 @@ class JournalProduction:
     # ── Cycle de vie d'une production ─────────────────────────────────────────
 
     def demarrer_production(self, idee: str, modele: str = "",
-                            mode: str = "standard") -> None:
+                            mode: str = "standard", projet: str = "") -> None:
         """Ouvre (ou rouvre, en cas de reprise) la production courante.
 
         En reprise, `production_id` est réutilisé : la même ligne est remise en
-        « en_cours » et les nouvelles étapes s'ajoutent à l'historique existant."""
+        « en_cours » et les nouvelles étapes s'ajoutent à l'historique existant.
+        `projet` (slug) est conservé si vide en reprise (COALESCE) pour ne pas
+        effacer le rattachement établi au premier lancement."""
         self._executer(
-            "INSERT OR IGNORE INTO productions (id, idee, modele, mode, statut, "
-            "demarree_le) VALUES (?, ?, ?, ?, 'en_cours', ?)",
-            (self.production_id, idee, modele, mode, _horodatage()))
+            "INSERT OR IGNORE INTO productions (id, idee, modele, mode, projet, "
+            "statut, demarree_le) VALUES (?, ?, ?, ?, ?, 'en_cours', ?)",
+            (self.production_id, idee, modele, mode, projet or None,
+             _horodatage()))
         self._executer(
             "UPDATE productions SET statut='en_cours', modele=?, mode=?, "
-            "terminee_le=NULL WHERE id=?",
-            (modele, mode, self.production_id))
+            "projet=COALESCE(NULLIF(?, ''), projet), terminee_le=NULL "
+            "WHERE id=?",
+            (modele, mode, projet, self.production_id))
         self.evenement("production_demarree", f"Production démarrée : {idee}",
-                       idee=idee, modele=modele, mode=mode)
+                       idee=idee, modele=modele, mode=mode, projet=projet)
 
     def terminer_production(self, statut: str = "terminee") -> None:
         """Clôt la production. `statut` : terminee | echec | arretee."""

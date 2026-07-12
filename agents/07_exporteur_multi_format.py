@@ -13,7 +13,7 @@ prêt à l'emploi.
 import os
 from langchain_core.exceptions import OutputParserException
 from agent_base import BaseAgent
-from shared_state import ExportMultiFormatOutput
+from shared_state import ExportMultiFormatOutput, dossier_sortie
 
 
 SYSTEM_PROMPT = """Tu es l'Exporteur Multi-Format d'un studio de cinéma virtuel.
@@ -146,7 +146,7 @@ class ExporteurMultiFormat(BaseAgent):
     def _sauvegarder(self, filename: str, code: str) -> str:
         """Sauvegarde le script FFmpeg dans agents/output/.
         Le nom de fichier est fixe (défini en interne, jamais fourni par le LLM)."""
-        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+        output_dir = dossier_sortie()
         os.makedirs(output_dir, exist_ok=True)
 
         filepath = os.path.join(output_dir, filename)

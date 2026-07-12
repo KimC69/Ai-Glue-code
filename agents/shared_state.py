@@ -10,6 +10,21 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Any
 
 
+# ─── Dossier de sortie (scripts, notes, rendus) ───────────────────────────────
+
+def dossier_sortie() -> str:
+    """Dossier où ranger les fichiers générés (scripts Blender/Unreal/FFmpeg/
+    Csound, notes, rendus). Par défaut `agents/output/` ; si la variable
+    d'environnement STUDIO_OUTPUT_DIR est définie — ce que fait main.py quand
+    l'option --projet est active — c'est le dossier du projet. Ainsi TOUS les
+    agents rangent leurs scripts au même endroit que le reste du projet, sans
+    avoir à recevoir le chemin en paramètre."""
+    depuis_env = os.environ.get("STUDIO_OUTPUT_DIR", "").strip()
+    if depuis_env:
+        return depuis_env
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+
+
 # ─── Mémoire commune (WorldState) ─────────────────────────────────────────────
 
 class WorldState:
