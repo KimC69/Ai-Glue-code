@@ -272,9 +272,26 @@ python api_serveur.py --hote 0.0.0.0 --port 8000
 | `GET /productions` | `consulter` | Historique des productions |
 | `GET /productions/<id>` | `consulter` | Détail : étapes + événements |
 | `POST /productions` | `lancer_production` | `{idee, modele?}` → `202 {id}` |
+| `POST /productions/<id>/pause` | `piloter_production` | Mettre en pause à distance |
+| `POST /productions/<id>/reprendre` | `piloter_production` | Reprendre une production en pause |
+| `POST /productions/<id>/arreter` | `piloter_production` | Arrêter proprement (reprise possible via `--reprendre`) |
+| `GET /agents` | `consulter` | Catalogue des agents + état d'activation |
+| `POST /agents/<numero>` | `gerer_utilisateurs` | `{actif}` — activer/désactiver un agent **optionnel** |
+| `GET /objectifs` | `consulter` | Note d'objectifs persistants |
+| `POST /objectifs` | `piloter_production` | `{texte}` — objectifs injectés aux futures productions |
+| `GET /memoire` | `consulter` | Objectifs + résumé de l'état de travail |
+| `POST /memoire/reset` | `gerer_utilisateurs` | Efface l'état de travail (refusé si une prod tourne) |
+| `POST /chat` | `piloter_production` | `{agent, message}` → `{reponse}` (discussion hors production) |
 
 Toutes les routes (sauf `/sante` et `/connexion`) exigent l'en-tête
 `Authorization: Bearer <jeton>`.
+
+> **Pilotage à distance (pause / reprise / arrêt).** L'orchestrateur consulte un
+> petit **fichier de commande** (`output/controle/<id>.json`) au début de chaque
+> étape : une commande prend donc effet **à la fin de l'étape en cours**, pas
+> instantanément. La lecture « échoue sûr » — un fichier illisible n'interrompt
+> jamais une production. Les agents **1 à 5** (chaîne créative) sont
+> indispensables et ne peuvent pas être désactivés ; seuls **6, 7 et 8** le sont.
 
 ```bash
 # 1) Se connecter et récupérer un jeton
@@ -307,7 +324,9 @@ curl -H "Authorization: Bearer $JETON" http://localhost:8000/productions/<id>
 Une **télécommande mobile** (Progressive Web App) servie directement par l'API :
 aucun magasin d'applications, aucune dépendance. Elle permet, depuis un
 téléphone Android, de se connecter, lancer une production et suivre son
-avancement (étapes + journal de l'orchestrateur).
+avancement (étapes + journal de l'orchestrateur). Pour les rôles habilités, elle
+ajoute le **pilotage à distance** (pause / reprise / arrêt), la **gestion des
+agents** optionnels, les **objectifs & mémoire** et un **chat** avec un agent.
 
 ```bash
 # Exposer l'API au réseau local (0.0.0.0), puis ouvrir sur le téléphone :
@@ -339,8 +358,9 @@ python bureau.py --url http://127.0.0.1:8000
 Elle offre : connexion, tableau de bord des productions (rafraîchissement
 automatique), lancement d'une nouvelle production (si le rôle l'autorise), et
 un panneau de détail montrant les étapes ET le journal des événements de
-l'orchestrateur (son « raisonnement »). Voir **MANUEL.md** pour la liste
-complète et les limites (les fonctions qui exigeront de nouveaux points d'API).
+l'orchestrateur (son « raisonnement »). S'y ajoutent, pour les rôles habilités,
+le **pilotage** (pause / reprise / arrêt), la **gestion des agents** optionnels,
+les **objectifs & mémoire** et le **chat**. Voir **MANUEL.md** pour le détail.
 
 ## Modèles disponibles
 

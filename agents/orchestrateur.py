@@ -52,6 +52,16 @@ class _JournalNul:
     def etape_echouee(self, *a, **k): pass
     def etape_revisee(self, *a, **k): pass
     def evenement(self, *a, **k): pass
+    def production_en_pause(self, *a, **k): pass
+    def production_reprise(self, *a, **k): pass
+
+
+class _ControleNul:
+    """Contrôle inactif (patron « objet nul ») : aucune commande à distance.
+    Utilisé quand l'orchestrateur tourne sans pilotage (ligne de commande
+    simple, tests). Duck-typé avec controle_production.Controleur."""
+    def lire(self): return ""
+    def effacer(self): pass
 
 
 class ErreurEtapeCritique(Exception):
@@ -151,6 +161,8 @@ class Orchestrateur:
         reprendre: bool = False,
         interactif: bool = False,
         journal: Any = None,
+        controle: Any = None,
+        intervalle_pause: float = 1.0,
     ):
         self.state = state
         self.etapes = etapes
@@ -161,6 +173,11 @@ class Orchestrateur:
         # Journal optionnel (SQLite + JSONL). Objet nul par défaut : l'orchestrateur
         # peut le solliciter à chaque étape sans jamais vérifier sa présence.
         self.journal = journal or _JournalNul()
+        # Pilotage à distance (pause / reprise / arrêt). Objet nul par défaut :
+        # sans pilotage branché, `lire()` renvoie toujours "" et rien ne change.
+        self.controle = controle or _ControleNul()
+        # Cadence d'interrogation du canal de commande pendant une pause.
+        self.intervalle_pause = intervalle_pause
 
     # ── Cycle de vie d'une étape ─────────────────────────────────────────────
 
@@ -264,6 +281,55 @@ class Orchestrateur:
         if etape.purger:
             self.state.save()
             print("   Sorties de cette étape réinitialisées (pas de données obsolètes).")
+
+    # ── Pilotage à distance (pause / reprise / arrêt) ────────────────────────
+
+    def _point_de_controle(self, etape: Etape) -> None:
+        """Consulté au début de chaque étape : applique la commande à distance.
+
+        « arreter » lève ArretUtilisateur (arrêt propre, reprise possible via
+        --reprendre) ; « pause » suspend la production dans une boucle d'attente
+        jusqu'à « reprendre » (ou « arreter »). Sans commande, ne fait rien."""
+        commande = self.controle.lire()
+        if commande == "arreter":
+            self._arret_distant(etape)
+        elif commande == "pause":
+            self._attendre_reprise(etape)
+
+    def _arret_distant(self, etape: Etape) -> None:
+        """Arrêt demandé à distance : sauvegarde, journalise, nettoie la commande
+        puis lève ArretUtilisateur (traité comme un arrêt volontaire)."""
+        saved_path = self.state.save()
+        self.journal.evenement(
+            "arret_distant",
+            f"Arrêt demandé à distance avant l'étape {etape.numero}.",
+            numero=etape.numero, nom=etape.nom)
+        self.controle.effacer()
+        print(f"\n⏹️  Arrêt demandé à distance avant « {etape.nom} ».")
+        print(f"💾 État sauvegardé → {saved_path}")
+        print("   Reprise possible plus tard avec : python main.py --reprendre")
+        raise ArretUtilisateur(etape)
+
+    def _attendre_reprise(self, etape: Etape) -> None:
+        """Boucle d'attente pendant une pause à distance. Ne sort QUE sur une
+        commande explicite : « reprendre » relance, « arreter » part en arrêt
+        propre. Toute autre valeur — « pause », mais aussi "" renvoyé par une
+        lecture « échoue sûr » (fichier momentanément illisible ou effacé) —
+        maintient la pause. Une pause demandée reste donc fiable : un incident de
+        lecture ne peut pas provoquer une reprise involontaire."""
+        self.journal.production_en_pause()
+        print(f"\n⏸️  Production en pause (demande à distance) avant « {etape.nom} ».")
+        print("   En attente d'une reprise ou d'un arrêt…")
+        while True:
+            time.sleep(self.intervalle_pause)
+            commande = self.controle.lire()
+            if commande == "arreter":
+                self._arret_distant(etape)          # lève ArretUtilisateur
+            if commande == "reprendre":
+                self.controle.effacer()
+                self.journal.production_reprise()
+                print("\n▶️  Reprise de la production.")
+                return
 
     # ── Human-in-the-loop ────────────────────────────────────────────────────
 
@@ -378,6 +444,12 @@ class Orchestrateur:
         total = len(self.etapes)
 
         for etape in self.etapes:
+            # Pilotage à distance : pause/arrêt AVANT tout travail sur l'étape.
+            # Placé hors du try/except d'exécution pour qu'un ArretUtilisateur
+            # (arrêt volontaire) remonte proprement au lieu d'être traité comme
+            # un échec d'étape.
+            self._point_de_controle(etape)
+
             if self.reprendre and self._etape_deja_faite(etape):
                 print(f"\n[Système] : Étape {etape.numero}/{total} — {etape.nom} : "
                       "déjà complétée, ignorée (--reprendre).")

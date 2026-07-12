@@ -42,6 +42,9 @@
         </div>
       </div>
       <div class="actions-barre">
+        <button id="btn-nav-agents" class="btn-icone" title="Agents">🎭</button>
+        <button id="btn-nav-memoire" class="btn-icone" title="Mémoire & objectifs">🧠</button>
+        <button id="btn-nav-chat" class="btn-icone" title="Discuter avec un agent">💬</button>
         <button id="btn-rafraichir" class="btn-icone" title="Rafraîchir">↻</button>
         <button id="btn-deconnexion" class="btn-icone" title="Se déconnecter">⏻</button>
       </div>
@@ -62,6 +65,64 @@
       <button id="btn-rafraichir-detail" class="btn-icone" title="Rafraîchir">↻</button>
     </header>
     <main class="contenu" id="contenu-detail"></main>
+  </section>
+
+  <!-- ══ Agents du pipeline ══════════════════════════════════════════════ -->
+  <section id="vue-agents" class="vue" hidden>
+    <header class="barre">
+      <button class="btn-icone btn-retour-nav" title="Retour">←</button>
+      <div class="titre-barre"><strong>Agents du pipeline</strong></div>
+      <span class="btn-icone" aria-hidden="true"></span>
+    </header>
+    <main class="contenu">
+      <p class="note">Activez ou désactivez les agents <strong>optionnels</strong>.
+        Les agents de la chaîne créative sont indispensables et ne peuvent pas
+        être désactivés. (Réglage réservé aux administrateurs.)</p>
+      <div id="liste-agents" class="liste"></div>
+    </main>
+  </section>
+
+  <!-- ══ Mémoire & objectifs ═════════════════════════════════════════════ -->
+  <section id="vue-memoire" class="vue" hidden>
+    <header class="barre">
+      <button class="btn-icone btn-retour-nav" title="Retour">←</button>
+      <div class="titre-barre"><strong>Mémoire &amp; objectifs</strong></div>
+      <span class="btn-icone" aria-hidden="true"></span>
+    </header>
+    <main class="contenu">
+      <div class="bloc">
+        <h3>Objectifs persistants</h3>
+        <p class="note">Injectés au lancement de chaque <em>nouvelle</em> production.</p>
+        <textarea id="ch-objectifs" rows="5"
+                  placeholder="Ex. : privilégier un ton poétique, éviter la violence…"></textarea>
+        <button id="btn-objectifs-enreg" class="btn btn-principal">Enregistrer les objectifs</button>
+        <p id="objectifs-info" class="note"></p>
+      </div>
+      <div class="bloc">
+        <h3>État de travail (mémoire vive)</h3>
+        <div id="memoire-etat"></div>
+        <button id="btn-memoire-reset" class="btn btn-secondaire" hidden>Réinitialiser la mémoire</button>
+      </div>
+    </main>
+  </section>
+
+  <!-- ══ Chat avec un agent ══════════════════════════════════════════════ -->
+  <section id="vue-chat" class="vue" hidden>
+    <header class="barre">
+      <button class="btn-icone btn-retour-nav" title="Retour">←</button>
+      <div class="titre-barre"><strong>Discuter avec un agent</strong></div>
+      <span class="btn-icone" aria-hidden="true"></span>
+    </header>
+    <main class="contenu contenu-chat">
+      <label class="label-chat">Agent
+        <select id="ch-chat-agent"></select>
+      </label>
+      <div id="chat-fil" class="chat-fil"></div>
+      <form id="form-chat" class="chat-saisie">
+        <input id="ch-chat-msg" type="text" placeholder="Votre message…" autocomplete="off">
+        <button type="submit" class="btn btn-principal">Envoyer</button>
+      </form>
+    </main>
   </section>
 
   <!-- ══ Fenêtre « nouvelle production » ═════════════════════════════════ -->

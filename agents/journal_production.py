@@ -237,6 +237,23 @@ class JournalProduction:
                        niveau="critique" if statut == "echec" else "info",
                        statut=statut)
 
+    def production_en_pause(self) -> None:
+        """Marque la production « en_pause » (pilotage à distance). N'écrit PAS
+        terminee_le : la production n'est pas finie, seulement suspendue."""
+        self._executer(
+            "UPDATE productions SET statut='en_pause' WHERE id=?",
+            (self.production_id,))
+        self.evenement("production_en_pause",
+                       "Production mise en pause (pilotage à distance).")
+
+    def production_reprise(self) -> None:
+        """Repasse la production « en_cours » après une pause à distance."""
+        self._executer(
+            "UPDATE productions SET statut='en_cours' WHERE id=?",
+            (self.production_id,))
+        self.evenement("production_reprise",
+                       "Production reprise après pause (pilotage à distance).")
+
     # ── Événements d'étape (appelés par l'orchestrateur) ──────────────────────
 
     def _enregistrer_etape(self, numero, nom, statut, duree_s, revisions,
@@ -287,6 +304,30 @@ class JournalProduction:
             " WHERE e.production_id = p.id AND e.statut='reussie') AS etapes_reussies "
             "FROM productions p ORDER BY p.demarree_le DESC LIMIT ?", (limite,))
         return [dict(r) for r in curseur.fetchall()] if curseur else []
+
+    def compter_productions_actives(self) -> int:
+        """Nombre de productions encore actives (statut « en_cours » ou
+        « en_pause »). Requête DIRECTE, sans pagination : contrairement à
+        `lister_productions`, elle ne peut pas « manquer » une production active
+        ancienne sortie de la fenêtre des N plus récentes — indispensable pour
+        les garde-fous (ex. refuser une réinitialisation de mémoire).
+
+        Contrairement aux autres lectures « échoue sûr », ce comptage sert de
+        garde-fou : s'il ne peut pas être établi de façon sûre (journal dégradé,
+        base verrouillée), il LÈVE RuntimeError plutôt que de renvoyer 0. Ainsi
+        l'appelant peut « échouer fermé » (refuser l'action) au lieu de croire à
+        tort qu'aucune production n'est active."""
+        curseur = self._executer(
+            "SELECT COUNT(*) FROM productions "
+            "WHERE statut IN ('en_cours', 'en_pause')")
+        if not curseur:
+            raise RuntimeError(
+                "comptage des productions actives indisponible (journal dégradé).")
+        ligne = curseur.fetchone()
+        if ligne is None:
+            raise RuntimeError(
+                "comptage des productions actives indisponible (résultat vide).")
+        return int(ligne[0])
 
     def details_production(self, production_id: str = "") -> dict:
         """Fiche complète d'une production : entête + étapes + événements."""

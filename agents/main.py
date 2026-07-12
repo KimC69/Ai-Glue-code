@@ -46,6 +46,9 @@ from executeur_local import ExecuteurLocal
 from worker_distant import ConfigWorker, outils_disponibles
 from journal_production import JournalProduction
 from securite import Securite, ErreurSecurite, ROLES_VALIDES, ROLE_DEFAUT
+from controle_production import Controleur
+import config_agents
+import memoire
 import utils_headless
 
 # Chargement des variables d'environnement (.env)
@@ -119,8 +122,21 @@ def _enregistrer_son(state, agent, son):
 
 # ── Définition déclarative du pipeline ───────────────────────────────────────
 
+def _idee_avec_objectifs(state) -> str:
+    """Idée transmise au Directeur Créatif, enrichie des objectifs persistants
+    du producteur s'il en a défini (voir memoire.py). Ainsi une ligne éditoriale
+    durable oriente chaque nouvelle production sans avoir à la retaper."""
+    idee = str(state.get("idea", ""))
+    objectifs = str(state.get("objectifs_producteur", "")).strip()
+    if not objectifs:
+        return idee
+    return (idee + "\n\n[OBJECTIFS PERSISTANTS DU PRODUCTEUR — à respecter "
+            "dans toute la production]\n" + objectifs)
+
+
 def construire_pipeline(executeur_distant=None, outils_worker=None,
-                        executeur_local=None, outils_local=None) -> list:
+                        executeur_local=None, outils_local=None,
+                        agents_actifs=None) -> list:
     """
     Décrit les étapes du studio. L'Orchestrateur se charge du reste.
 
@@ -138,7 +154,7 @@ def construire_pipeline(executeur_distant=None, outils_worker=None,
             numero=1, nom="Agent 01 - Directeur Créatif",
             fichier="01_directeur_creatif.py",
             classe="DirecteurCreatif", methode="generer_vision",
-            preparer=lambda s: {"idea": s.get("idea")},
+            preparer=lambda s: {"idea": _idee_avec_objectifs(s)},
             enregistrer=_enregistrer_vision,
             cles_sortie=("vision_globale", "genre", "tone"),
             titre="VISION VALIDÉE ET ENREGISTRÉE",
@@ -273,6 +289,14 @@ def construire_pipeline(executeur_distant=None, outils_worker=None,
             purger=("mood_musical", "csound_script", "sound_saved_path"),
         ),
     ]
+
+    # Filtrage des agents désactivés (agents optionnels 6/7/8 uniquement : la
+    # chaîne créative 1–5 est indispensable et toujours conservée). Appliqué
+    # AVANT l'ajout des étapes de rendu, qui ne sont pas des agents.
+    if agents_actifs is None:
+        agents_actifs = config_agents.charger_config()
+    etapes = [e for e in etapes
+              if config_agents.est_actif(e.numero, agents_actifs)]
 
     if executeur_distant is not None:
         etapes += etapes_rendu_distant(executeur_distant, outils_worker or {},
@@ -890,6 +914,14 @@ def lancer_studio(argv=None):
 
     state.update("idea", concept_initial)
 
+    # Objectifs persistants du producteur : injectés dans une NOUVELLE production
+    # (le Directeur Créatif les reçoit avec l'idée). En reprise, l'étape 1 est
+    # déjà faite : les objectifs restent ceux de la production d'origine.
+    note_objectifs = memoire.lire_objectifs().get("texte", "").strip()
+    if note_objectifs:
+        state.update("objectifs_producteur", note_objectifs)
+        print("[Système] : Objectifs persistants du producteur pris en compte.")
+
     # ── 3. Journal de production (SQLite + logs structurés JSONL) ─────────────
     # L'identifiant de production est persisté dans l'état : une reprise
     # (--reprendre) réutilise le même identifiant, si bien que ses nouvelles
@@ -911,6 +943,10 @@ def lancer_studio(argv=None):
         mode=_mode_execution(args))
 
     # ── 4. Exécution du pipeline par l'orchestrateur central ────────────────
+    # Canal de pilotage à distance (pause / reprise / arrêt) : l'orchestrateur le
+    # consulte au début de chaque étape. Les interfaces (API/PWA/bureau) y
+    # écrivent les commandes.
+    controle = Controleur(production_id)
     orchestrateur = Orchestrateur(
         state=state,
         etapes=construire_pipeline(executeur_distant, outils_worker,
@@ -920,6 +956,7 @@ def lancer_studio(argv=None):
         reprendre=args.reprendre,
         interactif=args.interactif,
         journal=journal,
+        controle=controle,
     )
 
     # try/finally : la fermeture du journal (et donc de la connexion SQLite)
@@ -947,6 +984,9 @@ def lancer_studio(argv=None):
         journal.terminer_production("terminee")
     finally:
         journal.fermer()
+        # La production est finie (succès, échec ou arrêt) : toute commande de
+        # pilotage résiduelle n'a plus de sens — on nettoie le canal.
+        controle.effacer()
 
     # ── 5. Récapitulatif final ───────────────────────────────────────────────
     _afficher_recap_final(state, bilan)

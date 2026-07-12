@@ -16,6 +16,8 @@
 const CLE_JETON = "studio_jeton";
 const CLE_ROLE = "studio_role";
 const ROLES_LANCEMENT = ["admin", "operateur"]; // droit « lancer_production »
+const ROLES_PILOTAGE = ["admin", "operateur"];  // droit « piloter_production »
+const ROLES_ADMIN = ["admin"];                    // droit « gerer_utilisateurs »
 
 let productionCourante = null; // id affiché dans la vue détail
 let minuteur = null;           // rafraîchissement automatique
@@ -56,7 +58,7 @@ async function api(methode, chemin, corps) {
 
 // ── Navigation entre vues ────────────────────────────────────────────────
 function afficherVue(nom) {
-  for (const v of ["connexion", "tableau", "detail"]) {
+  for (const v of ["connexion", "tableau", "detail", "agents", "memoire", "chat"]) {
     $("#vue-" + v).hidden = (v !== nom);
   }
   clearInterval(minuteur);
@@ -105,6 +107,9 @@ async function seDeconnecter() {
 function entrerTableau() {
   $("#badge-role").textContent = role();
   $("#btn-nouvelle").hidden = !ROLES_LANCEMENT.includes(role());
+  // Le chat nécessite « piloter_production » : inutile de le proposer à un
+  // simple observateur (il n'obtiendrait qu'un refus 403).
+  $("#btn-nav-chat").hidden = !ROLES_PILOTAGE.includes(role());
   afficherVue("tableau");
   rafraichirListe();
 }
@@ -160,6 +165,7 @@ async function afficherDetail(id, silencieux) {
           ${p.terminee_le ? `<span>Terminée : ${formaterDate(p.terminee_le)}</span>` : ""}
         </div>
       </div>
+      <div class="bloc" id="detail-controle" hidden></div>
       <div class="bloc">
         <h3>Étapes (${etapes.length})</h3>
         <div id="detail-etapes"></div>
@@ -169,6 +175,7 @@ async function afficherDetail(id, silencieux) {
         <div id="detail-evts"></div>
       </div>`;
     $("#contenu-detail .detail-idee").textContent = p.idee || "(sans titre)";
+    rendreControles(p);
 
     const boiteEtapes = $("#detail-etapes");
     if (etapes.length === 0) boiteEtapes.innerHTML = `<p class="etat-vide">Pas encore d'étape.</p>`;
@@ -203,6 +210,172 @@ function ligneEvenement(ev) {
     <div class="evt-msg"></div>`;
   el.querySelector(".evt-msg").textContent = ev.message || "";
   return el;
+}
+
+// ── Pilotage à distance (pause / reprise / arrêt) ───────────────────────────
+function rendreControles(p) {
+  const boite = $("#detail-controle");
+  if (!boite) return;
+  const actif = ["en_cours", "en_pause"].includes(p.statut || "");
+  const pilotable = actif && ROLES_PILOTAGE.includes(role());
+  if (!pilotable) { boite.hidden = true; boite.innerHTML = ""; return; }
+  boite.hidden = false;
+  const enPause = p.statut === "en_pause";
+  boite.innerHTML = `
+    <h3>Pilotage</h3>
+    <p class="note">Une commande prend effet à la fin de l'étape en cours.</p>
+    <div class="controle-boutons">
+      ${enPause
+        ? `<button class="btn btn-principal" data-cmd="reprendre">▶️ Reprendre</button>`
+        : `<button class="btn btn-secondaire" data-cmd="pause">⏸️ Pause</button>`}
+      <button class="btn btn-danger" data-cmd="arreter">⏹️ Arrêter</button>
+    </div>`;
+  boite.querySelectorAll("button[data-cmd]").forEach((b) =>
+    b.addEventListener("click", () => piloter(p.id, b.dataset.cmd)));
+}
+
+async function piloter(id, commande) {
+  if (commande === "arreter" &&
+      !confirm("Arrêter définitivement cette production ?")) return;
+  try {
+    const rep = await api("POST", "/productions/" + id + "/" + commande);
+    toast(rep.message || "Commande transmise", "succes");
+    afficherDetail(id, true);
+  } catch (e) { toast(e.message, "erreur"); }
+}
+
+// ── Agents (activation / désactivation) ─────────────────────────────────────
+async function entrerAgents() { afficherVue("agents"); await chargerAgents(); }
+
+async function chargerAgents() {
+  try {
+    const rep = await api("GET", "/agents");
+    const boite = $("#liste-agents");
+    boite.innerHTML = "";
+    const admin = ROLES_ADMIN.includes(role());
+    for (const a of (rep.agents || [])) {
+      const el = document.createElement("div");
+      el.className = "carte-agent";
+      el.innerHTML = `
+        <div class="agent-txt">
+          <strong></strong>
+          <small>${a.optionnel ? "optionnel" : "indispensable"}</small>
+        </div>
+        <label class="bascule">
+          <input type="checkbox" ${a.actif ? "checked" : ""} ${(!a.optionnel || !admin) ? "disabled" : ""}>
+          <span class="glissiere"></span>
+        </label>`;
+      el.querySelector("strong").textContent = a.numero + ". " + a.nom;
+      const cb = el.querySelector("input");
+      cb.addEventListener("change", () => basculerAgent(a.numero, cb.checked));
+      boite.appendChild(el);
+    }
+  } catch (e) { if (e.code !== 401) toast(e.message, "erreur"); }
+}
+
+async function basculerAgent(numero, actif) {
+  try {
+    await api("POST", "/agents/" + numero, { actif });
+    toast("Agent " + numero + (actif ? " activé" : " désactivé"), "succes");
+  } catch (e) { toast(e.message, "erreur"); chargerAgents(); }
+}
+
+// ── Mémoire & objectifs ─────────────────────────────────────────────────────
+async function entrerMemoire() { afficherVue("memoire"); await chargerMemoire(); }
+
+async function chargerMemoire() {
+  try {
+    const rep = await api("GET", "/memoire");
+    const obj = rep.objectifs || {};
+    const etat = rep.etat || {};
+    $("#ch-objectifs").value = obj.texte || "";
+    $("#objectifs-info").textContent = obj.modifie_le
+      ? "Modifié le " + formaterDate(obj.modifie_le) + (obj.par ? " par " + obj.par : "")
+      : "Aucun objectif enregistré.";
+
+    const boite = $("#memoire-etat");
+    boite.innerHTML = "";
+    const cles = etat.cles || {};
+    const noms = Object.keys(cles);
+    if (!etat.present || noms.length === 0) {
+      boite.innerHTML = `<p class="etat-vide">Aucune mémoire de travail enregistrée.</p>`;
+    } else {
+      for (const k of noms) {
+        const l = document.createElement("div");
+        l.className = "memoire-cle";
+        l.innerHTML = `<strong></strong><span></span>`;
+        l.querySelector("strong").textContent = k;
+        l.querySelector("span").textContent = cles[k];
+        boite.appendChild(l);
+      }
+    }
+    const peutPiloter = ROLES_PILOTAGE.includes(role());
+    $("#ch-objectifs").disabled = !peutPiloter;
+    $("#btn-objectifs-enreg").hidden = !peutPiloter;
+    $("#btn-memoire-reset").hidden = !ROLES_ADMIN.includes(role());
+  } catch (e) { if (e.code !== 401) toast(e.message, "erreur"); }
+}
+
+async function enregistrerObjectifs() {
+  try {
+    await api("POST", "/objectifs", { texte: $("#ch-objectifs").value });
+    toast("Objectifs enregistrés", "succes");
+    chargerMemoire();
+  } catch (e) { toast(e.message, "erreur"); }
+}
+
+async function reinitialiserMemoire() {
+  if (!confirm("Réinitialiser la mémoire de travail (world_state) ?")) return;
+  try {
+    const rep = await api("POST", "/memoire/reset");
+    toast(rep.message || "Mémoire réinitialisée", "succes");
+    chargerMemoire();
+  } catch (e) { toast(e.message, "erreur"); }
+}
+
+// ── Chat interactif avec un agent ───────────────────────────────────────────
+async function entrerChat() { afficherVue("chat"); await remplirAgentsChat(); }
+
+async function remplirAgentsChat() {
+  const select = $("#ch-chat-agent");
+  if (select.options.length > 0) return; // déjà rempli
+  try {
+    const rep = await api("GET", "/agents");
+    for (const a of (rep.agents || [])) {
+      const opt = document.createElement("option");
+      opt.value = a.numero;
+      opt.textContent = a.numero + ". " + a.nom;
+      select.appendChild(opt);
+    }
+  } catch (e) { if (e.code !== 401) toast(e.message, "erreur"); }
+}
+
+function ajouterBulle(texte, cote) {
+  const b = document.createElement("div");
+  b.className = "bulle " + cote;
+  b.textContent = texte;
+  const fil = $("#chat-fil");
+  fil.appendChild(b);
+  fil.scrollTop = fil.scrollHeight;
+  return b;
+}
+
+async function envoyerChat(evt) {
+  evt.preventDefault();
+  const champ = $("#ch-chat-msg");
+  const message = champ.value.trim();
+  if (!message) return;
+  const numero = Number($("#ch-chat-agent").value);
+  ajouterBulle(message, "moi");
+  champ.value = "";
+  const attente = ajouterBulle("…", "agent");
+  try {
+    const rep = await api("POST", "/chat", { agent: numero, message });
+    attente.textContent = rep.reponse || "(pas de réponse)";
+  } catch (e) {
+    attente.textContent = "⚠️ " + e.message;
+    attente.classList.add("erreur");
+  }
 }
 
 // ── Nouvelle production (modale) ─────────────────────────────────────────────
@@ -275,6 +448,16 @@ function init() {
   $("#btn-retour").addEventListener("click", entrerTableau);
   $("#btn-rafraichir-detail").addEventListener("click", () => afficherDetail(productionCourante, true));
   $("#modale").addEventListener("click", (e) => { if (e.target.id === "modale") fermerModale(); });
+
+  // Navigation vers les vues Agents / Mémoire / Chat, et retours.
+  $("#btn-nav-agents").addEventListener("click", entrerAgents);
+  $("#btn-nav-memoire").addEventListener("click", entrerMemoire);
+  $("#btn-nav-chat").addEventListener("click", entrerChat);
+  document.querySelectorAll(".btn-retour-nav").forEach((b) =>
+    b.addEventListener("click", entrerTableau));
+  $("#btn-objectifs-enreg").addEventListener("click", enregistrerObjectifs);
+  $("#btn-memoire-reset").addEventListener("click", reinitialiserMemoire);
+  $("#form-chat").addEventListener("submit", envoyerChat);
 
   if (jeton()) entrerTableau();
   else afficherVue("connexion");

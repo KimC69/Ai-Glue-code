@@ -141,3 +141,71 @@ class ClientAPI:
             corps_requete["modele"] = modele
         _, corps = self._appel("POST", "/productions", corps_requete)
         return corps
+
+    # ── Pilotage à distance d'une production (permission piloter_production) ───
+
+    def piloter_production(self, production_id: str, commande: str) -> dict:
+        """POST /productions/<id>/(pause|reprendre|arreter). `commande` doit être
+        « pause », « reprendre » ou « arreter ». L'effet est appliqué par le
+        pipeline à la fin de l'étape en cours, pas instantanément."""
+        _, corps = self._appel(
+            "POST", f"/productions/{production_id}/{commande}")
+        return corps
+
+    def mettre_en_pause(self, production_id: str) -> dict:
+        return self.piloter_production(production_id, "pause")
+
+    def reprendre_production(self, production_id: str) -> dict:
+        return self.piloter_production(production_id, "reprendre")
+
+    def arreter_production(self, production_id: str) -> dict:
+        return self.piloter_production(production_id, "arreter")
+
+    # ── Agents (activation/désactivation) ────────────────────────────────────
+
+    def lister_agents(self) -> list:
+        """GET /agents — catalogue des agents et leur état d'activation
+        (permission consulter)."""
+        _, corps = self._appel("GET", "/agents")
+        return corps.get("agents", [])
+
+    def definir_agent(self, numero: int, actif: bool) -> list:
+        """POST /agents/<numero> {actif} — active/désactive un agent optionnel
+        (permission gerer_utilisateurs). Renvoie la liste des agents à jour."""
+        _, corps = self._appel("POST", f"/agents/{numero}", {"actif": bool(actif)})
+        return corps.get("agents", [])
+
+    # ── Mémoire et objectifs ─────────────────────────────────────────────────
+
+    def lire_objectifs(self) -> dict:
+        """GET /objectifs — note d'objectifs persistants (permission consulter)."""
+        _, corps = self._appel("GET", "/objectifs")
+        return corps
+
+    def definir_objectifs(self, texte: str) -> dict:
+        """POST /objectifs {texte} — enregistre les objectifs persistants
+        (permission piloter_production)."""
+        _, corps = self._appel("POST", "/objectifs", {"texte": texte})
+        return corps
+
+    def lire_memoire(self) -> dict:
+        """GET /memoire — objectifs + résumé de l'état de travail (consulter)."""
+        _, corps = self._appel("GET", "/memoire")
+        return corps
+
+    def reinitialiser_memoire(self) -> dict:
+        """POST /memoire/reset — efface l'état de travail (gerer_utilisateurs).
+        Refusé (409) si une production est en cours ou en pause."""
+        _, corps = self._appel("POST", "/memoire/reset")
+        return corps
+
+    # ── Chat interactif avec un agent (hors production) ──────────────────────
+
+    def chat(self, numero_agent: int, message: str, modele: str = "") -> str:
+        """POST /chat {agent, message} — pose une question libre à un agent et
+        renvoie sa réponse en texte (permission piloter_production)."""
+        corps_requete = {"agent": numero_agent, "message": message}
+        if modele:
+            corps_requete["modele"] = modele
+        _, corps = self._appel("POST", "/chat", corps_requete)
+        return corps.get("reponse", "")

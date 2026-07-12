@@ -346,14 +346,42 @@ Toutes les routes (sauf `/sante` et `/connexion`) exigent l'en-tête
 | `GET /productions` | `consulter` | `{productions:[{..., etapes_reussies}]}` |
 | `GET /productions/<id>` | `consulter` | `{production, etapes:[...], evenements:[...]}` ou `404` |
 | `POST /productions` | `lancer_production` | `{idee, modele?}` → `202 {id, statut, suivi}` |
+| `POST /productions/<id>/pause` | `piloter_production` | met la production en pause (effet fin d'étape) |
+| `POST /productions/<id>/reprendre` | `piloter_production` | reprend une production en pause |
+| `POST /productions/<id>/arreter` | `piloter_production` | arrêt propre ; reprise possible via `--reprendre` |
+| `GET /agents` | `consulter` | `{agents:[{numero, nom, optionnel, actif}]}` |
+| `POST /agents/<numero>` | `gerer_utilisateurs` | `{actif}` — désactivable **seulement** pour les agents 6/7/8 (`409` sinon) |
+| `GET /objectifs` | `consulter` | `{texte, modifie_le, par}` |
+| `POST /objectifs` | `piloter_production` | `{texte}` — injectés au lancement des futures productions |
+| `GET /memoire` | `consulter` | `{objectifs, etat:{present, production_id, cles}}` |
+| `POST /memoire/reset` | `gerer_utilisateurs` | efface `world_state` (`409` si une prod est active) |
+| `POST /chat` | `piloter_production` | `{agent, message, modele?}` → `{reponse}` |
 | `GET /` `/app.js` `/style.css` … | publique | fichiers statiques de la PWA (liste blanche) |
 
 **Codes d'erreur clés** : `400` corps invalide, `401` jeton absent/invalide,
-`403` rôle insuffisant, `404` route/production inconnue, `411` longueur
-manquante. **Jamais de `500` pour un refus de sécurité.**
+`403` rôle insuffisant, `404` route/production/agent inconnu, `409` action
+incompatible avec l'état courant (prod déjà terminée, agent indispensable, prod
+active), `411` longueur manquante, `502/503` le chat n'a pas pu joindre le
+modèle. **Jamais de `500` pour un refus de sécurité.**
 
-**Statuts** : production = `en_cours | terminee | echec | arretee` ; étape =
-`reussie | ignoree | echouee`. Un événement peut avoir un niveau `critique`.
+**Statuts** : production = `en_cours | en_pause | terminee | echec | arretee` ;
+étape = `reussie | ignoree | echouee`. Un événement peut avoir un niveau
+`critique`.
+
+**Pilotage à distance — comment ça marche.** Une production tourne dans un
+sous-processus détaché : on ne peut plus lui « parler » au clavier. Le canal de
+commande est un **fichier JSON par production** (`output/controle/<id>.json`).
+Les interfaces y écrivent `pause`/`reprendre`/`arreter` ; l'orchestrateur le lit
+au **début de chaque étape**. Conséquences : (1) l'effet arrive **à la fin de
+l'étape en cours** ; (2) la lecture « échoue sûr » — un fichier corrompu n'arrête
+jamais une production ; (3) l'écriture « échoue fermé » — si la commande ne peut
+pas être écrite, l'API le signale honnêtement au lieu de faire croire à un arrêt.
+
+**Objectifs & mémoire.** Les *objectifs* (`output/objectifs.json`) sont une note
+persistante injectée au Directeur Créatif au lancement de chaque **nouvelle**
+production. La *mémoire de travail* est le `world_state` de la dernière
+production : `GET /memoire` en donne un résumé (clés remplies, valeurs longues
+tronquées) et `POST /memoire/reset` l'efface (refusé tant qu'une prod tourne).
 
 Exemple complet :
 
@@ -392,7 +420,10 @@ Trouver l'IP du PC : `ip addr` (Linux) ou `ipconfig` (Windows).
 
 Connexion, tableau de bord des productions (auto-rafraîchi), lancement d'une
 production (si le rôle l'autorise), et vue détail avec les **étapes** et le
-**journal des événements** de l'orchestrateur.
+**journal des événements** de l'orchestrateur. Plus, pour les rôles habilités :
+**pilotage à distance** (pause / reprise / arrêt depuis la vue détail),
+**gestion des agents** optionnels, **objectifs & mémoire**, et **chat** avec un
+agent choisi.
 
 ### 10.4 Caveat important : HTTPS pour installer
 
@@ -431,6 +462,13 @@ L'adresse de l'API est aussi modifiable dans l'écran de connexion.
   seulement si le rôle est `admin` ou `operateur`.
 - **Détail** : entête (statut, modèle, dates), tableau des **étapes**
   (numéro, nom, statut, durée) et **journal** des événements de l'orchestrateur.
+- **Pilotage** : boutons Pause / Reprendre / Arrêter, activés selon le statut
+  de la production et le rôle (`piloter_production`).
+- **Agents** : fenêtre listant les 8 agents avec un interrupteur par agent
+  optionnel (6/7/8), réservé aux administrateurs.
+- **Mémoire & objectifs** : édition des objectifs persistants, consultation de
+  l'état de travail, réinitialisation (admin).
+- **Chat** : fenêtre de discussion avec l'agent choisi (hors production).
 - **Déconnexion** : révoque le jeton côté serveur.
 
 ### 11.3 Détails techniques
@@ -442,21 +480,18 @@ L'adresse de l'API est aussi modifiable dans l'écran de connexion.
 - Les appels réseau tournent dans un **thread** ; l'interface ne se fige
   jamais. Un `401` (jeton expiré) ramène proprement à l'écran de connexion.
 
-### 11.4 Limites honnêtes (fonctions « à venir »)
+### 11.4 Limites honnêtes
 
-Les interfaces ne peuvent faire que ce que **l'API expose aujourd'hui** :
-connexion, consultation, lancement, suivi, déconnexion. Certaines idées de la
-vision d'ensemble **nécessiteront de nouveaux points d'API** avant d'apparaître
-dans le bureau ou la PWA — elles ne sont volontairement **pas** simulées :
+Les interfaces ne font que ce que **l'API expose**. Sont désormais disponibles :
+pause / reprise / arrêt d'une production, activation/désactivation des agents
+optionnels, objectifs & mémoire, et chat avec un agent. Restent volontairement
+**hors périmètre** (non simulés) :
 
-- ajouter / retirer / configurer des agents à chaud ;
-- gérer la mémoire ou les objectifs d'une production en cours ;
-- intervenir/mettre en pause **au milieu** d'une production (l'équivalent du
-  mode `--interactif` de la CLI) ;
-- arrêter une production déjà lancée.
-
-Quand ces endpoints existeront (côté `api_serveur.py`), les interfaces pourront
-les brancher.
+- ajouter ou retirer des agents « à chaud » (le catalogue des 8 agents est fixe ;
+  seuls 6/7/8 sont activables/désactivables) ;
+- réviser le contenu **au milieu** d'une étape (l'équivalent fin du mode
+  `--interactif` de la CLI) — le pilotage agit à la **granularité de l'étape** ;
+- discuter **avec la production en cours** (le chat est hors production).
 
 ---
 
@@ -557,6 +592,6 @@ Le projet suit une feuille de route en 10 étapes.
 | 9 | Application mobile (PWA Android) | ✅ |
 | 10 | Application de bureau (Tkinter) | ✅ |
 
-Les évolutions futures passeront surtout par de **nouveaux points d'API**
-(pilotage en cours de production, gestion des agents/mémoire), que les deux
-interfaces pourront alors exposer.
+Le pilotage à distance (pause / reprise / arrêt), la gestion des agents
+optionnels, les objectifs & mémoire et le chat sont désormais exposés par l'API
+et branchés dans la PWA comme dans le bureau.

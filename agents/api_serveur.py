@@ -50,6 +50,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from securite import Securite, ErreurSecurite, DUREE_JETON_DEFAUT
 from journal_production import JournalProduction
+from controle_production import ecrire_commande
+import config_agents
+import chat_agents
+import memoire
 
 VERSION = "1.0"
 DOSSIER_DEFAUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -80,6 +84,11 @@ TAILLE_MAX_CORPS = 64 * 1024
 # Format d'un identifiant de production (voir main.py / journal_production.py).
 _ID_PRODUCTION = re.compile(r"^[0-9a-f]{12}$")
 ROUTE_PRODUCTION = re.compile(r"^/productions/([0-9a-f]{12})$")
+# Pilotage à distance d'une production : pause / reprise / arrêt.
+ROUTE_CONTROLE = re.compile(
+    r"^/productions/([0-9a-f]{12})/(pause|reprendre|arreter)$")
+# Activation/désactivation d'un agent par son numéro.
+ROUTE_AGENT = re.compile(r"^/agents/([0-9]+)$")
 
 
 @dataclass
@@ -273,6 +282,27 @@ class RequeteAPI(BaseHTTPRequestHandler):
                 return self._erreur(404, "production inconnue")
             return self._json(200, details)
 
+        # /agents : liste des agents et de leur état d'activation (consulter).
+        if self.path == "/agents":
+            if self._exiger("consulter") is None:
+                return
+            return self._json(200, {
+                "agents": config_agents.liste_agents(self.config.dossier)})
+
+        # /objectifs : note d'objectifs persistants du producteur (consulter).
+        if self.path == "/objectifs":
+            if self._exiger("consulter") is None:
+                return
+            return self._json(200, memoire.lire_objectifs(self.config.dossier))
+
+        # /memoire : objectifs + résumé de l'état de travail (consulter).
+        if self.path == "/memoire":
+            if self._exiger("consulter") is None:
+                return
+            return self._json(200, {
+                "objectifs": memoire.lire_objectifs(self.config.dossier),
+                "etat": memoire.resume_world_state(self.config.dossier)})
+
         # Interface mobile (PWA) : fichiers statiques publics (/, /app.js, …).
         if self._servir_statique():
             return
@@ -288,6 +318,23 @@ class RequeteAPI(BaseHTTPRequestHandler):
             return self._deconnexion()
         if self.path == "/productions":
             return self._lancer_production()
+
+        # Pilotage à distance : /productions/<id>/(pause|reprendre|arreter).
+        m = ROUTE_CONTROLE.match(self.path)
+        if m:
+            return self._piloter_production(m.group(1), m.group(2))
+
+        # Activation/désactivation d'un agent : /agents/<numero>.
+        m = ROUTE_AGENT.match(self.path)
+        if m:
+            return self._basculer_agent(int(m.group(1)))
+
+        if self.path == "/objectifs":
+            return self._definir_objectifs()
+        if self.path == "/memoire/reset":
+            return self._reinitialiser_memoire()
+        if self.path == "/chat":
+            return self._chat()
         return self._erreur(404, "route inconnue")
 
     # ── Handlers POST ─────────────────────────────────────────────────────────
@@ -351,6 +398,134 @@ class RequeteAPI(BaseHTTPRequestHandler):
         return self._json(202, {
             "id": production_id, "statut": "en_cours",
             "suivi": f"/productions/{production_id}"})
+
+    # ── Pilotage à distance d'une production ─────────────────────────────────
+
+    def _piloter_production(self, production_id: str, commande: str):
+        """POST /productions/<id>/(pause|reprendre|arreter) → transmet une
+        commande de pilotage (permission piloter_production). L'effet est pris en
+        compte par le sous-processus au début de l'étape suivante — la réponse le
+        dit clairement plutôt que de laisser croire à un arrêt instantané."""
+        if self._exiger("piloter_production") is None:
+            return
+        details = self.journal.details_production(production_id)
+        if not details:
+            return self._erreur(404, "production inconnue")
+        statut = details.get("production", {}).get("statut", "")
+        if statut not in ("en_cours", "en_pause"):
+            return self._erreur(409, f"production « {statut} » : le pilotage "
+                                     "n'est possible que sur une production en "
+                                     "cours ou en pause.")
+        try:
+            ecrire_commande(production_id, commande, dossier=self.config.dossier)
+        except (OSError, ValueError) as e:
+            return self._erreur(500, f"commande non transmise : {e}")
+        return self._json(200, {
+            "ok": True, "id": production_id, "commande": commande,
+            "message": f"Commande « {commande} » transmise — effet à la fin de "
+                       "l'étape en cours."})
+
+    # ── Activation / désactivation des agents ────────────────────────────────
+
+    def _basculer_agent(self, numero: int):
+        """POST /agents/<numero> {actif: bool} → active ou désactive un agent
+        optionnel (permission gerer_utilisateurs). Refuse (409) de désactiver un
+        agent de la chaîne créative indispensable."""
+        if self._exiger("gerer_utilisateurs") is None:
+            return
+        try:
+            config_agents.agent(numero)
+        except ValueError:
+            return self._erreur(404, "agent inconnu")
+        corps = self._corps_json()
+        if corps is None:
+            return
+        actif = corps.get("actif")
+        if not isinstance(actif, bool):
+            return self._erreur(400, "le champ « actif » (booléen) est obligatoire")
+        try:
+            config_agents.definir_agent(numero, actif, dossier=self.config.dossier)
+        except ValueError as e:
+            return self._erreur(409, str(e))
+        except OSError as e:
+            return self._erreur(500, f"configuration non enregistrée : {e}")
+        return self._json(200, {
+            "agents": config_agents.liste_agents(self.config.dossier)})
+
+    # ── Mémoire et objectifs ─────────────────────────────────────────────────
+
+    def _definir_objectifs(self):
+        """POST /objectifs {texte} → enregistre la note d'objectifs persistants,
+        injectée au lancement des futures productions (permission
+        piloter_production)."""
+        charge = self._exiger("piloter_production")
+        if charge is None:
+            return
+        corps = self._corps_json()
+        if corps is None:
+            return
+        texte = str(corps.get("texte", ""))
+        try:
+            objet = memoire.ecrire_objectifs(
+                texte, par=charge.get("sub", ""), dossier=self.config.dossier)
+        except OSError as e:
+            return self._erreur(500, f"objectifs non enregistrés : {e}")
+        return self._json(200, objet)
+
+    def _reinitialiser_memoire(self):
+        """POST /memoire/reset → efface l'état de travail (world_state)
+        (permission gerer_utilisateurs). Refusé si une production est active,
+        pour ne pas effacer la mémoire vive sous les pieds d'un sous-processus."""
+        if self._exiger("gerer_utilisateurs") is None:
+            return
+        try:
+            actives = self.journal.compter_productions_actives()
+        except RuntimeError:
+            # Impossible de vérifier → on « échoue fermé » : on refuse plutôt
+            # que de risquer d'effacer la mémoire pendant une production active.
+            return self._erreur(503, "état des productions indisponible : "
+                                     "réinitialisation de la mémoire refusée par "
+                                     "précaution.")
+        if actives > 0:
+            return self._erreur(409, "une production est en cours ou en pause : "
+                                     "réinitialisation de la mémoire impossible.")
+        efface = memoire.reinitialiser_world_state(self.config.dossier)
+        return self._json(200, {
+            "ok": True, "efface": efface,
+            "message": "Mémoire de travail réinitialisée." if efface
+                       else "Aucune mémoire de travail à réinitialiser."})
+
+    # ── Chat interactif avec un agent (hors production) ──────────────────────
+
+    def _chat(self):
+        """POST /chat {agent, message, modele?} → {agent, reponse}. Discussion
+        libre avec un agent (permission piloter_production). L'appel au modèle
+        peut échouer : on le traduit en erreur propre (503 sans accès OpenAI,
+        502 si l'agent ne répond pas), jamais en 500."""
+        if self._exiger("piloter_production") is None:
+            return
+        corps = self._corps_json()
+        if corps is None:
+            return
+        try:
+            numero = int(corps.get("agent"))
+        except (TypeError, ValueError):
+            return self._erreur(400, "le champ « agent » (numéro) est obligatoire")
+        message = str(corps.get("message", "")).strip()
+        if not message:
+            return self._erreur(400, "le champ « message » est obligatoire")
+        modele = str(corps.get("modele", "")).strip()
+        dossier_agents = os.path.dirname(self.config.main_script)
+        try:
+            reponse = chat_agents.repondre(
+                numero, message, dossier_agents=dossier_agents, modele=modele)
+        except ValueError as e:
+            return self._erreur(404, str(e))
+        except RuntimeError as e:
+            return self._erreur(503, str(e))
+        except Exception as e:            # échec de l'appel LLM : 502, pas 500
+            return self._erreur(502, f"l'agent n'a pas pu répondre : {e}")
+        return self._json(200, {"agent": numero, "reponse": reponse})
 
 
 # ── Lancement du pipeline en arrière-plan ─────────────────────────────────────
@@ -459,6 +634,11 @@ def principal(argv=None) -> int:
     print("  Routes      : GET /sante · POST /connexion · POST /deconnexion")
     print("                GET /productions · GET /productions/<id>")
     print("                POST /productions")
+    print("                POST /productions/<id>/(pause|reprendre|arreter)")
+    print("                GET /agents · POST /agents/<numero>")
+    print("                GET /objectifs · POST /objectifs")
+    print("                GET /memoire · POST /memoire/reset")
+    print("                POST /chat")
     if nb_comptes == 0:
         print("\n  ⚠️  Aucun compte : créez un administrateur avant de vous connecter :")
         print("      python main.py --creer-utilisateur admin --role admin")

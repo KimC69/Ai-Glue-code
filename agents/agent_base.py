@@ -80,3 +80,27 @@ class BaseAgent:
             ("system", system_prompt),
             ("human", user_prompt),
         ]).partial(format_instructions=self.base_parser.get_format_instructions())
+
+    def discuter(self, message: str, role: str = "", contexte: str = "") -> str:
+        """Répond à une question libre du producteur, EN DEHORS d'une production.
+
+        Contrairement aux méthodes métier (generer_vision, etc.) qui exigent une
+        sortie structurée (Pydantic), le chat est une conversation ordinaire :
+        on appelle directement le modèle et on renvoie son texte, sans parser.
+        `role` décrit le personnage à incarner (fourni par le catalogue des
+        agents) ; à défaut, on retombe sur l'identifiant de l'agent."""
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        persona = role or self.agent_id
+        systeme = (
+            f"Tu es le {persona}, un agent du Studio IA cinématographique. "
+            "Le producteur discute librement avec toi (hors production) : réponds "
+            "en français, de façon claire, concrète et utile. Ne renvoie PAS de "
+            "JSON ni de code de format — juste ta réponse en texte."
+        )
+        messages = [SystemMessage(content=systeme)]
+        if contexte:
+            messages.append(SystemMessage(content=f"Contexte : {contexte}"))
+        messages.append(HumanMessage(content=message))
+        reponse = self.llm.invoke(messages)
+        return (getattr(reponse, "content", "") or "").strip()

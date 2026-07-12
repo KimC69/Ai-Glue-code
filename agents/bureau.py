@@ -36,6 +36,8 @@ except ImportError:                     # Sans écran : module importable quand 
     TK_DISPONIBLE = False
 
 ROLES_LANCEMENT = ("admin", "operateur")   # rôles ayant « lancer_production »
+ROLES_PILOTAGE = ("admin", "operateur")    # rôles ayant « piloter_production »
+ROLES_ADMIN = ("admin",)                     # rôles ayant « gerer_utilisateurs »
 INTERVALLE_RAFRAICHISSEMENT_MS = 5000       # suivi en direct
 
 
@@ -204,6 +206,12 @@ class AppBureau:
         self.btn_nouvelle = ttk.Button(barre, text="+ Nouvelle production",
                                        command=self._dialogue_nouvelle)
         self.btn_nouvelle.pack(side="right", padx=6)
+        self.btn_chat = ttk.Button(barre, text="💬 Chat", command=self._dialogue_chat)
+        self.btn_chat.pack(side="right", padx=6)
+        self.btn_memoire = ttk.Button(barre, text="🧠 Mémoire", command=self._dialogue_memoire)
+        self.btn_memoire.pack(side="right", padx=6)
+        self.btn_agents = ttk.Button(barre, text="🎭 Agents", command=self._dialogue_agents)
+        self.btn_agents.pack(side="right", padx=6)
 
         panneaux = ttk.Panedwindow(cadre, orient="horizontal")
         panneaux.pack(fill="both", expand=True, padx=12, pady=(0, 12))
@@ -225,6 +233,20 @@ class AppBureau:
         self.lbl_detail_meta = ttk.Label(droite, text="", foreground="#555")
         self.lbl_detail_meta.pack(anchor="w", pady=(0, 10))
 
+        # Boutons de pilotage à distance (activés seulement si la production est
+        # en cours / en pause et si le rôle a la permission « piloter_production »).
+        self.cadre_controle = ttk.Frame(droite)
+        self.cadre_controle.pack(anchor="w", pady=(0, 10))
+        self.btn_pause = ttk.Button(self.cadre_controle, text="⏸️ Pause",
+                                    state="disabled", command=lambda: self._piloter("pause"))
+        self.btn_pause.pack(side="left", padx=(0, 6))
+        self.btn_reprendre = ttk.Button(self.cadre_controle, text="▶️ Reprendre",
+                                        state="disabled", command=lambda: self._piloter("reprendre"))
+        self.btn_reprendre.pack(side="left", padx=6)
+        self.btn_arreter = ttk.Button(self.cadre_controle, text="⏹️ Arrêter",
+                                      state="disabled", command=lambda: self._piloter("arreter"))
+        self.btn_arreter.pack(side="left", padx=6)
+
         ttk.Label(droite, text="Étapes").pack(anchor="w")
         self.tableau_etapes = ttk.Treeview(
             droite, columns=("num", "nom", "statut", "duree"), show="headings", height=8)
@@ -245,6 +267,9 @@ class AppBureau:
         self.lbl_role.config(text=f"rôle : {self.client.role}")
         peut_lancer = self.client.role in ROLES_LANCEMENT
         self.btn_nouvelle.config(state="normal" if peut_lancer else "disabled")
+        # Le chat exige « piloter_production » : sinon on désactive le bouton.
+        self.btn_chat.config(
+            state="normal" if self.client.role in ROLES_PILOTAGE else "disabled")
         self._afficher(self.cadre_tableau)
         self._rafraichir_liste()
         self._programmer_rafraichissement()
@@ -297,6 +322,16 @@ class AppBureau:
         if p.get("terminee_le"):
             meta += f"   ·   Terminée : {p['terminee_le']}"
         self.lbl_detail_meta.config(text=meta)
+
+        # État des boutons de pilotage selon le statut courant et le rôle.
+        statut = p.get("statut", "")
+        pilotable = (statut in ("en_cours", "en_pause")
+                     and self.client.role in ROLES_PILOTAGE)
+        self.btn_arreter.config(state="normal" if pilotable else "disabled")
+        self.btn_pause.config(
+            state="normal" if pilotable and statut == "en_cours" else "disabled")
+        self.btn_reprendre.config(
+            state="normal" if pilotable and statut == "en_pause" else "disabled")
 
         for ligne in self.tableau_etapes.get_children():
             self.tableau_etapes.delete(ligne)
@@ -352,6 +387,211 @@ class AppBureau:
 
         ttk.Button(actions, text="Annuler", command=fenetre.destroy).pack(side="right")
         ttk.Button(actions, text="Lancer", command=lancer).pack(side="right", padx=8)
+
+    # -- pilotage à distance (pause / reprise / arrêt) --
+
+    def _piloter(self, commande):
+        pid = self.production_courante
+        if not pid:
+            return
+        if commande == "arreter" and not messagebox.askyesno(
+                "Arrêter", "Arrêter définitivement cette production ?"):
+            return
+
+        def apres(rep):
+            messagebox.showinfo("Pilotage", rep.get("message", "Commande transmise."))
+            self._charger_detail(pid)
+
+        self._en_arriere_plan(
+            lambda: self.client.piloter_production(pid, commande), apres)
+
+    # -- dialogue « agents » (activation / désactivation) --
+
+    def _dialogue_agents(self):
+        fenetre = tk.Toplevel(self.racine)
+        fenetre.title("Agents du pipeline")
+        fenetre.geometry("540x460")
+        fenetre.transient(self.racine)
+        ttk.Label(fenetre, wraplength=500, justify="left", padding=12,
+                  text="Activez ou désactivez les agents optionnels. La chaîne "
+                       "créative (agents 1 à 5) est indispensable et ne peut pas "
+                       "être désactivée. (Réglage réservé aux administrateurs.)"
+                  ).pack(anchor="w")
+        conteneur = ttk.Frame(fenetre, padding=(12, 0))
+        conteneur.pack(fill="both", expand=True)
+        admin = self.client.role in ROLES_ADMIN
+
+        def recharger():
+            self._en_arriere_plan(self.client.lister_agents, rendre)
+
+        def rendre(agents):
+            for w in conteneur.winfo_children():
+                w.destroy()
+            for a in agents:
+                ligne = ttk.Frame(conteneur)
+                ligne.pack(fill="x", pady=3)
+                var = tk.BooleanVar(value=a.get("actif", True))
+                etat = "normal" if (a.get("optionnel") and admin) else "disabled"
+                ttk.Checkbutton(
+                    ligne, variable=var, state=etat,
+                    command=lambda n=a["numero"], v=var: self._basculer_agent(
+                        n, v.get(), recharger)).pack(side="left")
+                genre = "optionnel" if a.get("optionnel") else "indispensable"
+                ttk.Label(ligne, text=f"{a['numero']}. {a['nom']}  ({genre})"
+                          ).pack(side="left", padx=6)
+
+        recharger()
+
+    def _basculer_agent(self, numero, actif, recharger):
+        def echec(e):
+            messagebox.showerror("Erreur", e.message)
+            recharger()   # remet la case dans son état réel côté serveur
+        self._en_arriere_plan(
+            lambda: self.client.definir_agent(numero, actif),
+            lambda _: None, echec)
+
+    # -- dialogue « mémoire & objectifs » --
+
+    def _dialogue_memoire(self):
+        fenetre = tk.Toplevel(self.racine)
+        fenetre.title("Mémoire & objectifs")
+        fenetre.geometry("580x560")
+        fenetre.transient(self.racine)
+        peut_piloter = self.client.role in ROLES_PILOTAGE
+
+        ttk.Label(fenetre, padding=(12, 12, 12, 4),
+                  text="Objectifs persistants (injectés au lancement des "
+                       "nouvelles productions)").pack(anchor="w")
+        champ = scrolledtext.ScrolledText(fenetre, height=6, wrap="word")
+        champ.pack(fill="x", padx=12)
+        info = ttk.Label(fenetre, text="", foreground="#888", padding=(12, 4))
+        info.pack(anchor="w")
+
+        ttk.Label(fenetre, padding=(12, 8, 12, 4),
+                  text="État de travail (mémoire vive)").pack(anchor="w")
+        zone = scrolledtext.ScrolledText(fenetre, height=10, wrap="word",
+                                         state="disabled")
+        zone.pack(fill="both", expand=True, padx=12)
+
+        actions = ttk.Frame(fenetre, padding=12)
+        actions.pack(fill="x")
+
+        def charger(rep):
+            obj = rep.get("objectifs", {})
+            etat = rep.get("etat", {})
+            champ.delete("1.0", "end")
+            champ.insert("1.0", obj.get("texte", ""))
+            info.config(text=(f"Modifié le {obj.get('modifie_le','')}"
+                              + (f" par {obj['par']}" if obj.get("par") else ""))
+                        if obj.get("modifie_le") else "Aucun objectif enregistré.")
+            cles = etat.get("cles", {})
+            zone.config(state="normal")
+            zone.delete("1.0", "end")
+            if not cles:
+                zone.insert("end", "(aucune mémoire de travail enregistrée)")
+            else:
+                for cle, valeur in cles.items():
+                    zone.insert("end", f"• {cle} : {valeur}\n\n")
+            zone.config(state="disabled")
+
+        def enregistrer():
+            texte = champ.get("1.0", "end").strip()
+            self._en_arriere_plan(
+                lambda: self.client.definir_objectifs(texte),
+                lambda _: messagebox.showinfo(
+                    "Objectifs", "Objectifs enregistrés.", parent=fenetre))
+
+        def reinitialiser():
+            if not messagebox.askyesno(
+                    "Réinitialiser", "Effacer la mémoire de travail ?",
+                    parent=fenetre):
+                return
+
+            def apres(rep):
+                messagebox.showinfo("Mémoire",
+                                    rep.get("message", "Réinitialisée."),
+                                    parent=fenetre)
+                self._en_arriere_plan(self.client.lire_memoire, charger)
+
+            self._en_arriere_plan(self.client.reinitialiser_memoire, apres)
+
+        if peut_piloter:
+            ttk.Button(actions, text="Enregistrer les objectifs",
+                       command=enregistrer).pack(side="left")
+        else:
+            champ.config(state="disabled")
+        if self.client.role in ROLES_ADMIN:
+            ttk.Button(actions, text="Réinitialiser la mémoire",
+                       command=reinitialiser).pack(side="right")
+
+        self._en_arriere_plan(self.client.lire_memoire, charger)
+
+    # -- dialogue « chat » --
+
+    def _dialogue_chat(self):
+        fenetre = tk.Toplevel(self.racine)
+        fenetre.title("Discuter avec un agent")
+        fenetre.geometry("620x560")
+        fenetre.transient(self.racine)
+
+        haut = ttk.Frame(fenetre, padding=12)
+        haut.pack(fill="x")
+        ttk.Label(haut, text="Agent :").pack(side="left")
+        combo = ttk.Combobox(haut, state="readonly")
+        combo.pack(side="left", fill="x", expand=True, padx=8)
+
+        fil = scrolledtext.ScrolledText(fenetre, wrap="word", state="disabled")
+        fil.pack(fill="both", expand=True, padx=12)
+
+        bas = ttk.Frame(fenetre, padding=12)
+        bas.pack(fill="x")
+        champ = ttk.Entry(bas)
+        champ.pack(side="left", fill="x", expand=True)
+        btn = ttk.Button(bas, text="Envoyer")
+        btn.pack(side="left", padx=8)
+
+        agents_map = {}
+
+        def remplir(agents):
+            libelles = []
+            for a in agents:
+                libelle = f"{a['numero']}. {a['nom']}"
+                agents_map[libelle] = a["numero"]
+                libelles.append(libelle)
+            combo["values"] = libelles
+            if libelles:
+                combo.current(0)
+
+        def ajouter(texte):
+            fil.config(state="normal")
+            fil.insert("end", texte + "\n\n")
+            fil.see("end")
+            fil.config(state="disabled")
+
+        def envoyer(_evt=None):
+            message = champ.get().strip()
+            libelle = combo.get()
+            if not message or libelle not in agents_map:
+                return
+            numero = agents_map[libelle]
+            ajouter("Vous : " + message)
+            champ.delete(0, "end")
+            btn.config(state="disabled")
+
+            def apres(reponse):
+                ajouter("Agent : " + (reponse or "(pas de réponse)"))
+                btn.config(state="normal")
+
+            def echec(e):
+                ajouter("⚠️ " + e.message)
+                btn.config(state="normal")
+
+            self._en_arriere_plan(
+                lambda: self.client.chat(numero, message), apres, echec)
+
+        btn.config(command=envoyer)
+        champ.bind("<Return>", envoyer)
+        self._en_arriere_plan(self.client.lister_agents, remplir)
 
 
 def principal(argv=None) -> int:
