@@ -137,6 +137,21 @@ def commande_export_multi_format(script_path: str) -> str:
     return f"bash {rel_path}"
 
 
+def commande_csound_headless(script_path: str) -> str:
+    """
+    Construit la commande pour rendre la bande son (fichier Csound .csd) en
+    audio, sans ouvrir d'interface graphique.
+
+    Args:
+        script_path : Chemin vers le fichier .csd généré par l'Agent 08
+
+    Returns:
+        La commande shell prête à copier-coller
+    """
+    rel_path = os.path.relpath(script_path)
+    return f"csound {rel_path} -o bande_son.wav"
+
+
 def commande_montage_headless(notes_path: str) -> str:
     """
     Le montage (Kdenlive/Shotcut) n'a pas de vrai mode headless : les deux
@@ -175,6 +190,7 @@ def afficher_commandes_headless(
     krita_path: str = "",
     obs_notes_path: str = "",
     export_script_path: str = "",
+    sound_path: str = "",
 ) -> None:
     """
     Affiche un bloc récapitulatif avec les commandes headless à copier-coller.
@@ -237,6 +253,11 @@ def afficher_commandes_headless(
         print("\n  Export multi-format (déclinaisons TV/téléphone/réseaux sociaux) :")
         print(f"    {commande_export_multi_format(export_script_path)}")
         _verifier_outil("ffmpeg", "FFmpeg")
+
+    if sound_path:
+        print("\n  Bande son (rend le fichier Csound en audio, sans interface) :")
+        print(f"    {commande_csound_headless(sound_path)}")
+        _verifier_outil("csound", "Csound")
 
     print("\n" + "─" * 60)
 

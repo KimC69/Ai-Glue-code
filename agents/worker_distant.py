@@ -53,7 +53,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
 VERSION = "1.0"
-OUTILS_STUDIO = ("blender", "unreal", "ffmpeg")
+OUTILS_STUDIO = ("blender", "unreal", "ffmpeg", "csound")
 TAILLE_MAX_CORPS = 5 * 1024 * 1024  # 5 Mo — largement au-delà d'un script généré
 
 
@@ -66,6 +66,7 @@ class ConfigWorker:
     dossier: str = "travaux_worker"
     blender: str = "blender"
     ffmpeg: str = "ffmpeg"
+    csound: str = "csound"
     bash: str = "bash"
     delai_max: int = 7200          # durée maximale d'un travail (secondes)
 
@@ -102,6 +103,8 @@ def outils_disponibles(config: ConfigWorker) -> dict:
         # embarque lui-même ses appels à Unreal Engine.
         "unreal": bash_ok,
         "ffmpeg": bash_ok and shutil.which(config.ffmpeg) is not None,
+        # Csound rend le fichier .csd directement en audio, sans interface.
+        "csound": shutil.which(config.csound) is not None,
     }
 
 
@@ -110,6 +113,9 @@ def construire_commande(config: ConfigWorker, travail: Travail) -> list:
     script = os.path.join(travail.dossier, travail.nom_script)
     if travail.outil == "blender":
         return [config.blender, "--background", "--python", script]
+    if travail.outil == "csound":
+        # Rend la partition Csound en fichier audio, dans le dossier du travail.
+        return [config.csound, script, "-o", "bande_son.wav"]
     # unreal / ffmpeg : scripts shell autonomes générés par les agents
     return [config.bash, script]
 
@@ -347,7 +353,7 @@ class RequeteWorker(BaseHTTPRequestHandler):
         if not nom:
             nom = "script"
         if "." not in nom:
-            nom += ".py" if outil == "blender" else ".sh"
+            nom += {"blender": ".py", "csound": ".csd"}.get(outil, ".sh")
         nom_script = f"script_{identifiant}_{nom}"
         with open(os.path.join(dossier, nom_script), "w", encoding="utf-8") as f:
             f.write(script)
@@ -380,7 +386,7 @@ def creer_worker(config: ConfigWorker):
 def principal(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Worker d'exécution distant du Studio IA — exécute les scripts "
-                    "Blender / Unreal / FFmpeg envoyés par main.py --worker.")
+                    "Blender / Unreal / FFmpeg / Csound envoyés par main.py --worker.")
     parser.add_argument("--hote", default="127.0.0.1",
                         help="Adresse d'écoute (0.0.0.0 pour exposer au réseau)")
     parser.add_argument("--port", type=int, default=8765, help="Port d'écoute")
@@ -390,6 +396,7 @@ def principal(argv=None) -> int:
                         help="Dossier où s'exécutent les travaux")
     parser.add_argument("--blender", default="blender", help="Chemin du binaire Blender")
     parser.add_argument("--ffmpeg", default="ffmpeg", help="Chemin du binaire FFmpeg")
+    parser.add_argument("--csound", default="csound", help="Chemin du binaire Csound")
     parser.add_argument("--delai-max", type=int, default=7200,
                         help="Durée maximale d'un travail en secondes (défaut : 7200)")
     args = parser.parse_args(argv)
@@ -398,7 +405,8 @@ def principal(argv=None) -> int:
              or secrets.token_hex(16))
     config = ConfigWorker(hote=args.hote, port=args.port, jeton=jeton,
                           dossier=args.dossier, blender=args.blender,
-                          ffmpeg=args.ffmpeg, delai_max=args.delai_max)
+                          ffmpeg=args.ffmpeg, csound=args.csound,
+                          delai_max=args.delai_max)
     serveur, executeur = creer_worker(config)
     outils = outils_disponibles(config)
     port_effectif = serveur.server_address[1]

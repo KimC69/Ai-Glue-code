@@ -186,6 +186,10 @@ class ExecuteurDistant:
         # alors dans le même dossier, où la vidéo rendue est disponible.
         return self._executer("ffmpeg", chemin_script, poursuivre=poursuivre_id)
 
+    def executer_csound(self, chemin_script: str) -> dict:
+        # Rend la bande son (.csd) en audio : travail autonome, sans chaînage.
+        return self._executer("csound", chemin_script)
+
     # ── Mécanique commune ────────────────────────────────────────────────────
 
     def _executer(self, outil: str, chemin_script: str, poursuivre: str = "") -> dict:

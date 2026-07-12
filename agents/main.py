@@ -109,6 +109,12 @@ def _enregistrer_export(state, agent, export):
     state.update("export_saved_path", export.get("saved_path", ""))
 
 
+def _enregistrer_son(state, agent, son):
+    state.update("mood_musical",     son["mood_musical"])
+    state.update("csound_script",    son["csound_script"])
+    state.update("sound_saved_path", son.get("saved_path", ""))
+
+
 # ── Définition déclarative du pipeline ───────────────────────────────────────
 
 def construire_pipeline(executeur_distant=None, outils_worker=None) -> list:
@@ -240,6 +246,25 @@ def construire_pipeline(executeur_distant=None, outils_worker=None) -> list:
             critique=False,   # l'export ne bloque jamais la production
             purger=("export_formats", "ffmpeg_script", "export_saved_path"),
         ),
+        Etape(
+            numero=8, nom="Agent 08 - Ingénieur du Son",
+            fichier="08_ingenieur_son.py",
+            classe="IngenieurSon", methode="composer_bande_son",
+            preparer=lambda s: {
+                "vision_globale": s.get("vision_globale"),
+                "visual_style": s.get("visual_style"),
+                "key_scenes": s.get("key_scenes"),
+                "genre": s.get("genre"),
+                "tone": s.get("tone"),
+            },
+            enregistrer=_enregistrer_son,
+            cles_sortie=("csound_script", "sound_saved_path"),
+            titre="BANDE SON COMPOSÉE (Csound)",
+            afficher=lambda agent, r: agent.afficher_rapport(),
+            critique=False,   # la bande son ne bloque jamais la production
+            conseil="Conseil : la composition d'une partition Csound bénéficie du modèle gpt-4o.",
+            purger=("mood_musical", "csound_script", "sound_saved_path"),
+        ),
     ]
 
     if executeur_distant is not None:
@@ -347,6 +372,23 @@ def etapes_rendu_distant(executeur, outils: dict, prochain_numero: int) -> list:
     else:
         indisponible("ffmpeg")
 
+    if outils.get("csound"):
+        etapes.append(Etape(
+            numero=prochain_numero + len(etapes),
+            nom="Rendu bande son (worker distant)",
+            fichier="", classe="", methode="executer_csound",
+            fabrique=lambda: executeur,
+            preparer=lambda s: {"chemin_script": s.get("sound_saved_path")},
+            enregistrer=_enregistrer_rendu("csound"),
+            cles_sortie=("rendu_csound_statut",),
+            titre="BANDE SON RENDUE SUR LE WORKER",
+            afficher=_afficher_rendu,
+            critique=False, essais=1, conseil=conseil,
+            purger=_purger_rendu("csound"),
+        ))
+    else:
+        indisponible("csound")
+
     return etapes
 
 
@@ -392,7 +434,7 @@ def _afficher_recap_final(state: WorldState, bilan: dict) -> None:
     # Rendus effectués sur le worker distant (--worker)
     rendus = [(prefixe, label) for prefixe, label in
               (("blender", "Rendu Blender"), ("unreal", "Setup Unreal"),
-               ("ffmpeg", "Exports FFmpeg"))
+               ("ffmpeg", "Exports FFmpeg"), ("csound", "Rendu bande son"))
               if state.get(f"rendu_{prefixe}_statut") == "ok"]
     if rendus:
         print("\n  ▶ RENDUS EXÉCUTÉS SUR LE WORKER DISTANT :")
@@ -417,6 +459,7 @@ def _afficher_recap_final(state: WorldState, bilan: dict) -> None:
             krita_path=state.get("krita_saved_path", "") if state.get("needs_krita") else "",
             obs_notes_path=obs_notes_path,
             export_script_path=state.get("export_saved_path", ""),
+            sound_path=state.get("sound_saved_path", ""),
         )
     else:
         print("\n  ℹ️  Chemins des scripts Blender/Unreal absents de l'état —")

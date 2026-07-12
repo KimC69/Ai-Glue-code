@@ -1,6 +1,6 @@
 # Système Multi-Agents Cinématographique — LangChain
 
-Un pipeline de production de films automatisé avec 7 agents IA spécialisés.
+Un pipeline de production de films automatisé avec 8 agents IA spécialisés.
 
 ## Architecture
 
@@ -27,6 +27,7 @@ Votre idée
     │
     ▼
   [Agent 07 - Exporteur Multi-Format] → Script FFmpeg multi-format (.sh) ← sauvegardé dans output/
+  [Agent 08 - Ingénieur du Son]      → Bande son Csound (.csd) ← sauvegardée dans output/
     │
     ▼
   output/
@@ -37,6 +38,7 @@ Votre idée
     ├── retouche_gimp.py          (script GIMP, si nécessaire)
     ├── concept_krita.py          (script Krita, si nécessaire)
     ├── export_multi_format.sh    (script FFmpeg)
+    ├── bande_son.csd             (bande son Csound, rendue en audio par csound)
     └── notes_*.txt               (instructions optionnelles)
 ```
 
@@ -87,7 +89,7 @@ sauvegardé automatiquement : corrigez le problème puis relancez avec
 `--reprendre`, chaque lancement démarre une production vierge (l'état
 précédent est écrasé — jamais de mélange entre deux productions). Chaque
 appel LLM est retenté une fois automatiquement avant de déclarer l'échec.
-Les Agents 06 et 07 sont optionnels : leur échec n'arrête jamais le pipeline
+Les Agents 06, 07 et 08 sont optionnels : leur échec n'arrête jamais le pipeline
 (et leurs sorties sont alors réinitialisées pour ne jamais afficher de
 données d'une production précédente).
 
@@ -144,6 +146,7 @@ outils que le worker déclare disponibles :
 | Rendu Blender | `output/scene_*.py` | `blender --background --python ...` |
 | Setup Unreal | `output/setup_*.sh` | `bash ...` (nécessite UE5 installé sur le worker) |
 | Exports FFmpeg | `output/export_multi_format.sh` | `bash ...` — chaîné dans le dossier du rendu Blender pour y retrouver la vidéo master |
+| Rendu bande son | `output/bande_son.csd` | `csound bande_son.csd -o bande_son.wav` (nécessite Csound installé sur le worker) |
 
 Chaque travail s'exécute dans un dossier isolé sur le worker ; les journaux
 et les fichiers produits sont rapatriés en flux — sans limite de taille,
@@ -327,7 +330,8 @@ complète et les limites (les fonctions qui exigeront de nouveaux points d'API).
 | `05_directeur_technique.py` | Agent 05 — classe `DirecteurTechnique` : script Shell Unreal Engine |
 | `06_superviseur_post_production.py` | Agent 06 — classe `SuperviseurPostProduction` : audit de conformité, déclenche GIMP/montage **seulement si nécessaire** |
 | `07_exporteur_multi_format.py` | Agent 07 — classe `ExporteurMultiFormat` : déclinaison multi-format (TV, téléphone, réseaux sociaux) via FFmpeg |
-| `utils_headless.py` | Génère les commandes headless (Blender, Unreal, GIMP, montage, export FFmpeg) prêtes à copier-coller |
+| `08_ingenieur_son.py` | Agent 08 — classe `IngenieurSon` : compose la bande originale sous forme d'un fichier Csound (.csd) autonome, rendu-able en audio sans interface |
+| `utils_headless.py` | Génère les commandes headless (Blender, Unreal, GIMP, montage, export FFmpeg, bande son Csound) prêtes à copier-coller |
 | `worker_distant.py` | Serveur d'exécution distant (stdlib pur, fichier autonome) — à lancer sur la machine de rendu ; API HTTP protégée par jeton |
 | `client_worker.py` | Client du worker + `ExecuteurDistant` branché dans le pipeline (étapes de rendu distantes, rapatriement journaux/fichiers) |
 | `orchestrateur.py` | Moteur d'exécution central — `Etape` (description déclarative) + `Orchestrateur` (retry, validation des sorties, reprise `--reprendre`, bilan, notification du journal) |

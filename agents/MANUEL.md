@@ -33,11 +33,12 @@
 ## 1. Ce que fait le projet
 
 Le **Studio IA** est une chaîne de production cinématographique automatisée.
-À partir d'une simple **idée de film** en une phrase, sept agents IA
+À partir d'une simple **idée de film** en une phrase, huit agents IA
 spécialisés (basés sur LangChain) collaborent pour produire, étape par étape :
 une vision artistique, une structure narrative, un scénario, des scripts de
 scène pour **Blender**, un setup pour **Unreal Engine**, un audit de
-post-production, et des scripts d'export multi-format **FFmpeg**.
+post-production, des scripts d'export multi-format **FFmpeg**, et une bande
+originale **Csound** (`.csd`) rendue en audio sans interface graphique.
 
 Autour de ce cœur créatif, le projet fournit une **infrastructure complète**
 pour piloter, tracer et sécuriser ces productions :
@@ -96,6 +97,7 @@ la plupart des décisions de conception.
    │  Agent 05 Directeur technique    → script Unreal (.sh)                  │
    │  Agent 06 Superviseur post-prod  → audit + outils conditionnels         │
    │  Agent 07 Exporteur multi-format → script FFmpeg (.sh)                  │
+   │  Agent 08 Ingénieur du son       → bande son Csound (.csd)              │
    └──────────────────────────────────┬──────────────────────────────────────┘
                                        │  piloté par
                             ┌──────────▼───────────┐
@@ -268,7 +270,8 @@ Connectez-vous avec `alice`, lancez une production, suivez ses étapes.
 | `05_directeur_technique.py` | Agent 05 `DirecteurTechnique` — génère un **script Shell Unreal** (`output/setup_*.sh`). |
 | `06_superviseur_post_production.py` | Agent 06 `SuperviseurPostProduction` — audite le résultat et ne déclenche **que les outils nécessaires** (GIMP, Krita, montage…). Optionnel. |
 | `07_exporteur_multi_format.py` | Agent 07 `ExporteurMultiFormat` — génère un **script FFmpeg** déclinant la vidéo master en 16:9, 9:16, 1:1… Optionnel. |
-| `utils_headless.py` | Fabrique les commandes « headless » (Blender, Unreal, FFmpeg…) prêtes à copier-coller. |
+| `08_ingenieur_son.py` | Agent 08 `IngenieurSon` — compose la **bande originale** sous forme d'un fichier **Csound** (`.csd`) autonome, rendu-able en audio sans interface (`csound bande_son.csd -o bande_son.wav`). Optionnel. |
+| `utils_headless.py` | Fabrique les commandes « headless » (Blender, Unreal, FFmpeg, Csound…) prêtes à copier-coller. |
 
 > Les fichiers d'agents commencent par un chiffre pour l'ordre de lecture.
 > Comme Python n'autorise pas `import 01_...`, l'orchestrateur les charge via
@@ -279,13 +282,13 @@ Connectez-vous avec `alice`, lancez une production, suivez ses étapes.
 | Fichier | Rôle détaillé |
 |---|---|
 | `orchestrateur.py` | Moteur central. `Etape` décrit une étape ; `Orchestrateur` exécute la liste : **retry** (2 tentatives), **validation** des sorties, **criticité** (échec critique = arrêt propre + sauvegarde ; optionnel = on continue), **reprise** (`--reprendre`), **human-in-the-loop** (`--interactif`), **bilan** final, et **notification du journal**. |
-| `main.py` | Point d'entrée CLI. Construit le pipeline (les 7 `Etape`), crée le journal, gère toutes les options (`--idea`, `--model`, `--reprendre`, `--interactif`, `--worker`, `--historique`, gestion des comptes…) et délègue à l'orchestrateur. |
+| `main.py` | Point d'entrée CLI. Construit le pipeline (les 8 `Etape`), crée le journal, gère toutes les options (`--idea`, `--model`, `--reprendre`, `--interactif`, `--worker`, `--historique`, gestion des comptes…) et délègue à l'orchestrateur. |
 
 ### 8.3 L'exécution distante (rendus lourds)
 
 | Fichier | Rôle détaillé |
 |---|---|
-| `worker_distant.py` | Serveur d'exécution à copier **sur la machine de rendu** (fichier autonome, stdlib pur). Reçoit un script + des fichiers, exécute Blender/Unreal/FFmpeg dans un dossier isolé, renvoie journaux et fichiers produits en flux. Protégé par jeton (`X-Jeton`). |
+| `worker_distant.py` | Serveur d'exécution à copier **sur la machine de rendu** (fichier autonome, stdlib pur). Reçoit un script + des fichiers, exécute Blender/Unreal/FFmpeg/Csound dans un dossier isolé, renvoie journaux et fichiers produits en flux. Protégé par jeton (`X-Jeton`). |
 | `client_worker.py` | Côté studio : client du worker + `ExecuteurDistant`, l'objet injecté comme « étape non-LLM » dans le pipeline pour piloter les rendus distants et rapatrier les résultats. |
 
 ### 8.4 L'observabilité

@@ -92,6 +92,14 @@ API HTTP stdlib pur qui met en service l'auth de l'étape 6. Trois invariants qu
 
 `studio.db` (et `securite.db`) sont désormais lus par l'API pendant que des sous-processus écrivent. Deux garde-fous à conserver sur toute connexion partagée : **WAL** (lecteurs + un écrivain simultanés) et **busy_timeout** (attendre une contention au lieu d'échouer). Surtout : dans `journal_production._executer`, un verrou transitoire (`database is locked/busy`) NE doit PAS faire basculer le journal en mode dégradé permanent — sinon une seule contention rend l'API aveugle (listes vides / 404) durablement ; on saute l'opération et la suivante réessaie. **Why:** le mode dégradé est conçu pour les pannes vraies (disque, base corrompue), pas pour la contention normale du multi-processus.
 
+## Agents « logiciels » : ils GÉNÈRENT des scripts, ils n'EXÉCUTENT rien
+
+Les agents créatifs (04 Blender, 05 Unreal, 06 GIMP/Krita/…, 07 FFmpeg, 08 son) produisent des **scripts/fichiers texte** via LLM, sauvegardés dans `output/`, puis affichés comme **commandes headless** prêtes à copier-coller (`utils_headless.py`). Aucun logiciel n'est ouvert automatiquement en local. La seule exécution réelle possible est **déléguée au worker distant** (`worker_distant.py`), sur liste blanche stricte `OUTILS_STUDIO` (blender/unreal/ffmpeg/csound). Il n'existe **aucun** pilotage souris/clavier/logiciel local.
+
+**Why:** rester zéro-dépendance et honnête sur les limites ; ne jamais faire croire qu'un rendu se lance seul. Le worker est le seul point d'exécution, et il est volontairement fermé (liste blanche, jeton).
+
+**How to apply:** nouvel agent « logiciel » = choisir un outil **réellement headless piloté par script** (ex. Csound `.csd` pour la musique : orchestre+partition dans un seul fichier texte, aucun échantillon externe, `csound f.csd -o out.wav`). Le brancher : schéma dans `shared_state.py` (+ validateur de forme), `Etape` `critique=False` dans `construire_pipeline`, callback `_enregistrer_*`, commande dans `utils_headless.py`. Pour l'exécution distante : ajouter l'outil à `OUTILS_STUDIO`, `ConfigWorker`, `outils_disponibles`, `construire_commande`, l'extension de fichier, le flag CLI, et une méthode `executer_<outil>` dans `ExecuteurDistant` + une étape dans `etapes_rendu_distant`.
+
 ## Interfaces PWA (étape 9) et bureau (étape 10)
 
 Décisions durables pour les deux interfaces clientes, toutes deux au-dessus de l'API (étape 7), en gardant la philosophie zéro-dépendance.

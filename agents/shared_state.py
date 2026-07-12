@@ -56,6 +56,8 @@ class WorldState:
             "obs_notes": "",
             "export_formats": "",
             "ffmpeg_script": "",
+            "mood_musical": "",
+            "csound_script": "",
             "last_updated": "",
         }
 
@@ -203,4 +205,25 @@ class ExportMultiFormatOutput(BaseModel):
             raise ValueError("Le script FFmpeg ne peut pas être vide.")
         if "#!/bin/bash" not in v:
             raise ValueError("Le script FFmpeg doit commencer par #!/bin/bash.")
+        return v
+
+
+class SoundEngineerOutput(BaseModel):
+    """Sortie structurée de l'Agent 08 — Ingénieur du Son.
+
+    Cet agent compose la bande originale du film sous forme d'un fichier
+    Csound (.csd) autonome, rendu-able en audio sans interface graphique
+    (csound bande_son.csd -o bande_son.wav).
+    """
+    mood_musical: str = Field(description="Ambiance sonore visée : tonalité, tempo, instrumentation, émotion")
+    csound_script: str = Field(description="Fichier Csound (.csd) complet, encadré par <CsoundSynthesizer>...</CsoundSynthesizer>")
+    filename: str = Field(description="Nom du fichier à créer (ex: bande_son.csd)")
+
+    @field_validator("csound_script", mode="after")
+    @classmethod
+    def _csd_valide(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Le fichier Csound ne peut pas être vide.")
+        if "<CsoundSynthesizer>" not in v or "</CsoundSynthesizer>" not in v:
+            raise ValueError("Le fichier Csound doit être encadré par <CsoundSynthesizer>...</CsoundSynthesizer>.")
         return v
