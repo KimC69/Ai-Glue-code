@@ -414,7 +414,7 @@ curl -H "Authorization: Bearer $JETON" http://localhost:8000/productions/<id>
 
 ---
 
-## 10. Étape 9 — Application mobile (PWA)
+## 10. Étape 9 — Application mobile (PWA + APK Android)
 
 ### 10.1 Qu'est-ce qu'une PWA ?
 
@@ -440,7 +440,7 @@ production (si le rôle l'autorise), et vue détail avec les **étapes** et le
 **gestion des agents** optionnels, **objectifs & mémoire**, et **chat** avec un
 agent choisi.
 
-### 10.4 Caveat important : HTTPS pour installer
+### 10.4 Caveat important : HTTPS pour installer en PWA
 
 L'**installation** et le **mode hors-ligne** exigent un « contexte sécurisé »
 (HTTPS, ou `localhost`). En `http://<IP>:8000`, le navigateur **refuse
@@ -455,6 +455,41 @@ Pour l'installer réellement, exposez l'API derrière du HTTPS :
 
 Une fois en HTTPS, le navigateur mobile proposera « Ajouter à l'écran
 d'accueil » et l'app s'ouvrira en plein écran (mode `standalone`).
+
+### 10.5 APK Android (installation directe sans navigateur)
+
+Le dossier `agents/mobile-apk/` transforme la PWA en **APK Android natif**
+avec [Capacitor](https://capacitorjs.com/). Cela donne un fichier `.apk` que
+l'on transfère et installe directement sur un téléphone, sans Google Play et
+sans avoir besoin de HTTPS pour l'installation.
+
+Build debug (recommandé pour les tests) :
+
+```bash
+cd agents/mobile-apk
+nix-shell shell.nix --run 'python build_apk.py --api-url http://<IP-du-PC>:8000'
+```
+
+Le APK est produit dans :
+
+```
+agents/mobile-apk/dist/studio-ia-regie-debug.apk
+```
+
+Build release (non signé par défaut, à signer ensuite) :
+
+```bash
+nix-shell shell.nix --run 'python build_apk.py --release --api-url http://<IP-du-PC>:8000'
+```
+
+**Principe :** l'APK embarque les fichiers web (HTML/CSS/JS) et se connecte à
+l'API distante dont l'adresse est injectée dans `www/config.js` au moment du
+build. Le téléphone et le serveur doivent être sur le même réseau (ou l'API
+doit être accessible publiquement via HTTPS).
+
+La documentation complète — prérequis, installation du SDK, signature du release,
+transfert sur téléphone, CI/CD GitHub Actions et dépannage — se trouve dans
+**`agents/mobile-apk/README.md`**.
 
 ---
 

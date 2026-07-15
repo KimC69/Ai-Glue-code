@@ -1,0 +1,21 @@
+{
+  "name": "studio-ia-mobile-apk",
+  "version": "1.0.0",
+  "description": "Régie Studio IA empaquetée en APK Android (Capacitor) à partir de la PWA.",
+  "private": true,
+  "scripts": {
+    "sync": "npx cap sync",
+    "add:android": "npx cap add android",
+    "open:android": "npx cap open android",
+    "build:android": "npx cap build android --keystorepath studio-ia.keystore --keystorealias studio-ia",
+    "build:debug": "cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/preferences": "^6.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}

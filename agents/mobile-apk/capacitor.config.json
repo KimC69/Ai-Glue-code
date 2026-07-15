@@ -1,0 +1,16 @@
+{
+  "appId": "fr.studioia.regie",
+  "appName": "Studio IA — Régie",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "http",
+    "allowNavigation": ["*"]
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1000,
+      "backgroundColor": "#0e0f13"
+    }
+  }
+}

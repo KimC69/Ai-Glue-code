@@ -11,6 +11,13 @@ output/
 # Logs des lancements de l'API
 lancements_api/
 
+# ── Build mobile APK (Capacitor) ─────────────────────────────────────────────
+mobile-apk/android/
+mobile-apk/node_modules/
+mobile-apk/dist/
+mobile-apk/*.keystore
+mobile-apk/*.jks
+
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]

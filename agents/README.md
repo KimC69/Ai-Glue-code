@@ -346,7 +346,7 @@ curl -H "Authorization: Bearer $JETON" http://localhost:8000/productions/<id>
 > Note : le sous-processus de production a besoin des dépendances du pipeline
 > (langchain…) installées ; l'API et l'authentification, elles, n'en ont pas.
 
-## Application mobile (PWA — étape 9)
+## Application mobile (PWA — étape 9) + APK Android
 
 Une **télécommande mobile** (Progressive Web App) servie directement par l'API :
 aucun magasin d'applications, aucune dépendance. Elle permet, depuis un
@@ -371,6 +371,21 @@ de chemins — aucune traversée de répertoire possible.
 > ni installable ni disponible hors-ligne. Pour l'installer réellement, placez
 > l'API derrière du HTTPS (reverse-proxy, ou un tunnel type `cloudflared` /
 > `ngrok`). Détails dans **MANUEL.md**.
+
+### Générer un APK installable
+
+Le dossier `agents/mobile-apk/` empaquette la PWA en application Android native
+via **Capacitor**. Le résultat est un fichier `.apk` qu'on installe directement
+sur un téléphone, sans passer par Google Play ni par un navigateur.
+
+```bash
+cd agents/mobile-apk
+nix-shell shell.nix --run 'python build_apk.py --api-url http://<IP-du-PC>:8000'
+# APK produit : agents/mobile-apk/dist/studio-ia-regie-debug.apk
+```
+
+La documentation exhaustive (prérequis, build release, signature, installation,
+CI/CD, dépannage) se trouve dans **`agents/mobile-apk/README.md`**.
 
 ## Application de bureau (étape 10)
 
