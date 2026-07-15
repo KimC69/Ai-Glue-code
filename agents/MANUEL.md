@@ -353,7 +353,7 @@ Toutes les routes (sauf `/sante` et `/connexion`) exigent l'en-tête
 | `GET /agents` | `consulter` | `{agents:[{numero, nom, optionnel, actif}]}` |
 | `POST /agents/<numero>` | `gerer_utilisateurs` | `{actif}` — désactivable **seulement** pour les agents 6/7/8 (`409` sinon) |
 | `GET /objectifs` | `consulter` | `{texte, modifie_le, par}` |
-| `POST /objectifs` | `piloter_production` | `{texte}` — injectés au lancement des futures productions |
+| `POST /objectifs` | `gerer_utilisateurs` | `{texte}` — injectés au lancement des futures productions (admin only) |
 | `GET /memoire` | `consulter` | `{objectifs, etat:{present, production_id, cles}}` |
 | `POST /memoire/reset` | `gerer_utilisateurs` | efface `world_state` (`409` si une prod est active) |
 | `POST /chat` | `piloter_production` | `{agent, message, modele?}` → `{reponse}` |
@@ -435,10 +435,10 @@ Trouver l'IP du PC : `ip addr` (Linux) ou `ipconfig` (Windows).
 
 Connexion, tableau de bord des productions (auto-rafraîchi), lancement d'une
 production (si le rôle l'autorise), et vue détail avec les **étapes** et le
-**journal des événements** de l'orchestrateur. Plus, pour les rôles habilités :
-**pilotage à distance** (pause / reprise / arrêt depuis la vue détail),
-**gestion des agents** optionnels, **objectifs & mémoire**, et **chat** avec un
-agent choisi.
+**journal des événements** de l'orchestrateur. Plus, selon le rôle :
+**pilotage à distance** (pause / reprise / arrêt) et **chat** pour les
+admin/operateur ; **gestion des agents** optionnels, **objectifs** et
+**réinitialisation de la mémoire** réservés à l'administrateur.
 
 ### 10.4 Caveat important : HTTPS pour installer en PWA
 

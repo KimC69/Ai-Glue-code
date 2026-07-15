@@ -184,7 +184,7 @@ class ClientAPI:
 
     def definir_objectifs(self, texte: str) -> dict:
         """POST /objectifs {texte} — enregistre les objectifs persistants
-        (permission piloter_production)."""
+        (permission gerer_utilisateurs : réservé à l'administrateur)."""
         _, corps = self._appel("POST", "/objectifs", {"texte": texte})
         return corps
 

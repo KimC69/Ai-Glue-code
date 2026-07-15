@@ -305,7 +305,7 @@ python api_serveur.py --hote 0.0.0.0 --port 8000
 | `GET /agents` | `consulter` | Catalogue des agents + état d'activation |
 | `POST /agents/<numero>` | `gerer_utilisateurs` | `{actif}` — activer/désactiver un agent **optionnel** |
 | `GET /objectifs` | `consulter` | Note d'objectifs persistants |
-| `POST /objectifs` | `piloter_production` | `{texte}` — objectifs injectés aux futures productions |
+| `POST /objectifs` | `gerer_utilisateurs` | `{texte}` — objectifs injectés aux futures productions (admin only) |
 | `GET /memoire` | `consulter` | Objectifs + résumé de l'état de travail |
 | `POST /memoire/reset` | `gerer_utilisateurs` | Efface l'état de travail (refusé si une prod tourne) |
 | `POST /chat` | `piloter_production` | `{agent, message}` → `{reponse}` (discussion hors production) |

@@ -481,8 +481,8 @@ class RequeteAPI(BaseHTTPRequestHandler):
     def _definir_objectifs(self):
         """POST /objectifs {texte} → enregistre la note d'objectifs persistants,
         injectée au lancement des futures productions (permission
-        piloter_production)."""
-        charge = self._exiger("piloter_production")
+        gerer_utilisateurs : seul l'administrateur fixe la ligne éditoriale)."""
+        charge = self._exiger("gerer_utilisateurs")
         if charge is None:
             return
         corps = self._corps_json()

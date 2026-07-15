@@ -309,10 +309,10 @@ async function chargerMemoire() {
         boite.appendChild(l);
       }
     }
-    const peutPiloter = ROLES_PILOTAGE.includes(role());
-    $("#ch-objectifs").disabled = !peutPiloter;
-    $("#btn-objectifs-enreg").hidden = !peutPiloter;
-    $("#btn-memoire-reset").hidden = !ROLES_ADMIN.includes(role());
+    const admin = ROLES_ADMIN.includes(role());
+    $("#ch-objectifs").disabled = !admin;
+    $("#btn-objectifs-enreg").hidden = !admin;
+    $("#btn-memoire-reset").hidden = !admin;
   } catch (e) { if (e.code !== 401) toast(e.message, "erreur"); }
 }
 

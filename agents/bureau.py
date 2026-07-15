@@ -515,7 +515,7 @@ class AppBureau:
 
             self._en_arriere_plan(self.client.reinitialiser_memoire, apres)
 
-        if peut_piloter:
+        if self.client.role in ROLES_ADMIN:
             ttk.Button(actions, text="Enregistrer les objectifs",
                        command=enregistrer).pack(side="left")
         else:
