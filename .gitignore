@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Studio IA — archive locale d'export
+studio-ia-local.zip

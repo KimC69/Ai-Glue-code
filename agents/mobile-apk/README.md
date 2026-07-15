@@ -11,17 +11,18 @@
 2. [Architecture](#2-architecture)
 3. [Prérequis](#3-prérequis)
 4. [Installation rapide (Replit)](#4-installation-rapide-replit)
-5. [Installation sur votre machine](#5-installation-sur-votre-machine)
-6. [Configuration de l'URL API](#6-configuration-de-lurl-api)
-7. [Build debug](#7-build-debug)
-8. [Build release](#8-build-release)
-9. [Signer un APK release](#9-signer-un-apk-release)
-10. [Installer sur un téléphone](#10-installer-sur-un-téléphone)
-11. [Fichiers et rôles](#11-fichiers-et-rôles)
-12. [Build automatisé (CI/CD)](#12-build-automatisé-cicd)
-13. [Dépannage](#13-dépannage)
-14. [Différences PWA vs APK](#14-différences-pwa-vs-apk)
-15. [Sécurité](#15-sécurité)
+5. [Mode 100 % local sans Replit](#5-mode-100--local-sans-replit)
+6. [Installation sur votre machine](#6-installation-sur-votre-machine)
+7. [Configuration de l'URL API](#7-configuration-de-lurl-api)
+8. [Build debug](#8-build-debug)
+9. [Build release](#9-build-release)
+10. [Signer un APK release](#10-signer-un-apk-release)
+11. [Installer sur un téléphone](#11-installer-sur-un-téléphone)
+12. [Fichiers et rôles](#12-fichiers-et-rôles)
+13. [Build automatisé (CI/CD)](#13-build-automatisé-cicd)
+14. [Dépannage](#14-dépannage)
+15. [Différences PWA vs APK](#15-différences-pwa-vs-apk)
+16. [Sécurité](#16-sécurité)
 
 ---
 
@@ -117,7 +118,7 @@ cd agents/mobile-apk
 nix-shell shell.nix
 
 # 3. Lancer le build
-gpython build_apk.py --api-url http://192.168.1.42:8000
+python build_apk.py --api-url http://192.168.1.42:8000
 ```
 
 Après le build, le fichier est :
@@ -131,9 +132,96 @@ agents/mobile-apk/dist/studio-ia-regie-debug.apk
 
 ---
 
-## 5. Installation sur votre machine
+## 5. Mode 100 % local sans Replit
 
-### 5.1 Ubuntu / Debian
+### 5.1 Le problème avec le cloud Replit
+
+Replit est excellent pour **développer** et **générer** l'APK, mais l'API qui
+tourne dans l'environnement Replit n'est pas joignable directement depuis votre
+téléphone. Pour utiliser l'APK au quotidien, il faut donc faire tourner l'API sur
+un **PC local** (Windows, Linux ou macOS) et que le téléphone soit sur le même
+réseau Wi-Fi.
+
+### 5.2 Exporter le Studio IA sur votre PC
+
+Un script prépare une archive autonome, sans données de production :
+
+```bash
+cd agents
+python export_local.py
+```
+
+Résultat à la racine du projet :
+
+```
+studio-ia-local.zip   (environ 0,5 Mo)
+```
+
+Décompressez ce fichier sur votre PC. Vous obtenez un dossier `agents/` contenant
+tout le code source.
+
+### 5.3 Installer les dépendances sur le PC
+
+**Python :**
+
+```bash
+cd agents
+python -m venv .venv
+source .venv/bin/activate        # Linux/macOS
+# ou .venv\Scripts\activate     # Windows
+
+pip install -r requirements.txt
+```
+
+> S'il n'y a pas de `requirements.txt`, installez les bibliothèques listées dans
+> `agents/README.md` (en général : requests, beautifulsoup4, flask, etc.).
+
+**Node.js + npm :** téléchargez la LTS sur https://nodejs.org/.
+
+**JDK 17 + Android SDK :** voir la section 5.4 ci-dessous.
+
+### 5.4 Lancer l'API et générer l'APK
+
+Sur le PC local :
+
+```bash
+cd agents
+source .venv/bin/activate
+
+# Lancer l'API sur toutes les interfaces réseau
+python api_serveur.py --hote 0.0.0.0 --port 8000
+```
+
+Dans un autre terminal :
+
+```bash
+cd agents/mobile-apk
+python build_apk.py --api-url http://<IP-du-PC>:8000
+```
+
+Le APK est produit dans `agents/mobile-apk/dist/` et peut être installé sur le
+téléphone.
+
+### 5.5 Résumé du flux local
+
+```
+PC local
+  ├── API Python (api_serveur.py) ← agent Studio IA
+  └── Build APK (build_apk.py)
+           │
+           │  http://IP-du-PC:8000  (même Wi-Fi)
+           ▼
+Téléphone Android
+  └── APK Studio IA
+```
+
+Aucune dépendance à Replit n'est nécessaire une fois le code exporté.
+
+---
+
+## 6. Installation sur votre machine
+
+### 6.1 Ubuntu / Debian
 
 ```bash
 # JDK 17
@@ -155,7 +243,7 @@ export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
 sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
 ```
 
-### 5.2 macOS (Homebrew)
+### 6.2 macOS (Homebrew)
 
 ```bash
 brew install openjdk@17 android-commandlinetools
@@ -167,7 +255,7 @@ export PATH=$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/34.0.0:$PATH
 sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
 ```
 
-### 5.3 Windows
+### 6.3 Windows
 
 1. Installer **Android Studio**.
 2. Dans Android Studio → SDK Manager, installer :
@@ -178,13 +266,13 @@ sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34
 
 ---
 
-## 6. Configuration de l'URL API
+## 7. Configuration de l'URL API
 
 L'APK embarque les fichiers web, mais **doit connaître l'adresse du serveur API**
 pour fonctionner. Cette adresse est injectée dans `www/config.js` au moment du
 build.
 
-### 6.1 Fichier `www/config.js`
+### 7.1 Fichier `www/config.js`
 
 ```javascript
 window.API_BASE_URL = ""; // mode web (même origine)
@@ -196,7 +284,7 @@ Pour un APK, `build_apk.py` réécrit automatiquement cette ligne :
 window.API_BASE_URL = "http://192.168.1.42:8000";
 ```
 
-### 6.2 Trouver l'adresse de l'API
+### 7.2 Trouver l'adresse de l'API
 
 Sur la machine qui fait tourner l'API :
 
@@ -208,7 +296,7 @@ python api_serveur.py --hote 0.0.0.0 --port 8000
 ip addr | grep "inet " | grep -v 127
 ```
 
-### 6.3 Règles de réseau
+### 7.3 Règles de réseau
 
 - Le téléphone et le serveur doivent être sur le **même réseau Wi-Fi**.
 - Le pare-feu du serveur doit autoriser le port `8000`.
@@ -217,7 +305,7 @@ tunnel) et l'URL correspondante doit être utilisée.
 
 ---
 
-## 7. Build debug
+## 8. Build debug
 
 Le build debug est le plus rapide et ne nécessite pas de signature. C'est la
 voie recommandée pour les tests.
@@ -251,7 +339,7 @@ dist/studio-ia-regie-debug.apk
 
 ---
 
-## 8. Build release
+## 9. Build release
 
 Le build release produit un APK plus petit et optimisé, mais **non signé** par
 défaut. Android refuse d'installer un APK release non signé ; il faut le signer
@@ -275,9 +363,9 @@ dist/studio-ia-regie-release-unsigned.apk
 
 ---
 
-## 9. Signer un APK release
+## 10. Signer un APK release
 
-### 9.1 Créer un keystore (une seule fois)
+### 10.1 Créer un keystore (une seule fois)
 
 ```bash
 cd agents/mobile-apk
@@ -294,7 +382,7 @@ Répondez aux questions. Le mot de passe du keystore sera demandé à chaque bui
 > **Conservez ce fichier en lieu sûr.** Sans le keystore et son mot de passe,
 > vous ne pourrez plus publier de mises à jour signées avec la même identité.
 
-### 9.2 Signer l'APK
+### 10.2 Signer l'APK
 
 ```bash
 cd agents/mobile-apk
@@ -316,7 +404,7 @@ apksigner sign \
 apksigner verify dist/studio-ia-regie-release.apk
 ```
 
-### 9.3 Automatiser la signature
+### 10.3 Automatiser la signature
 
 Vous pouvez ajouter dans `build_apk.py` (ou dans un script CI) les étapes
 `zipalign` + `apksigner` après le build release. Gardez le mot de passe dans une
@@ -324,9 +412,9 @@ variable d'environnement, jamais dans le dépôt.
 
 ---
 
-## 10. Installer sur un téléphone
+## 11. Installer sur un téléphone
 
-### 10.1 Par USB (adb)
+### 11.1 Par USB (adb)
 
 ```bash
 # Brancher le téléphone, activer le mode développeur + débogage USB
@@ -334,7 +422,7 @@ adb devices
 adb install -r dist/studio-ia-regie-debug.apk
 ```
 
-### 10.2 Par transfert de fichier
+### 11.2 Par transfert de fichier
 
 1. Copier le APK sur le téléphone (Bluetooth, cable, cloud, etc.).
 2. Ouvrir le fichier depuis le téléphone.
@@ -342,7 +430,7 @@ adb install -r dist/studio-ia-regie-debug.apk
    accordez-la pour l'application de fichiers utilisée.
 4. L'app s'installe et apparaît dans le lanceur.
 
-### 10.3 Premier lancement
+### 11.3 Premier lancement
 
 1. Assurez-vous que `api_serveur.py` tourne sur le réseau.
 2. Ouvrez l'app.
@@ -350,7 +438,7 @@ adb install -r dist/studio-ia-regie-debug.apk
 
 ---
 
-## 11. Fichiers et rôles
+## 12. Fichiers et rôles
 
 ```text
 agents/mobile-apk/
@@ -372,7 +460,7 @@ agents/mobile-apk/
 └── dist/                     # APK produits
 ```
 
-### 11.1 `build_apk.py`
+### 12.1 `build_apk.py`
 
 Script Python qui orchestre tout le build. Il vérifie les prérequis, installe
 les dépendances Node, configure l'API, synchronise les ressources avec Android,
@@ -386,7 +474,7 @@ Options :
 | `--release` | Build release (APK non signé) |
 | `--clean` | Supprime `android/`, `node_modules/` et `dist/` avant de rebuild |
 
-### 11.2 `capacitor.config.json`
+### 12.2 `capacitor.config.json`
 
 ```json
 {
@@ -405,7 +493,7 @@ Options :
 - `allowNavigation`: autorise la WebView à naviguer vers n'importe quelle URL
   (nécessaire pour atteindre l'API distante).
 
-### 11.3 `www/app.js` vs `agents/pwa/app.js`
+### 12.3 `www/app.js` vs `agents/pwa/app.js`
 
 `www/app.js` est une copie adaptée :
 
@@ -415,7 +503,7 @@ Options :
   worker** dans le APK (il est inutile et source de problèmes avec les fichiers
   locaux).
 
-### 11.4 `www/config.js`
+### 12.4 `www/config.js`
 
 Point de configuration unique. Lors d'un build APK, `build_apk.py` injecte ici
 l'URL de l'API. En mode web, ce fichier reste vide (`""`) pour conserver le
@@ -423,9 +511,9 @@ comportement « même origine » de la PWA originale.
 
 ---
 
-## 12. Build automatisé (CI/CD)
+## 13. Build automatisé (CI/CD)
 
-### 12.1 GitHub Actions
+### 13.1 GitHub Actions
 
 Vous pouvez générer le APK automatiquement à chaque push. Exemple de workflow
 `.github/workflows/build-apk.yml` :
@@ -485,7 +573,7 @@ jobs:
           path: agents/mobile-apk/android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 12.2 Notes CI/CD
+### 13.2 Notes CI/CD
 
 - Stockez `API_URL` dans les variables de dépôt GitHub (`vars.STUDIO_API_URL`).
 - Pour le build release, ajoutez la création du keystore et la signature dans des
@@ -494,9 +582,9 @@ jobs:
 
 ---
 
-## 13. Dépannage
+## 14. Dépannage
 
-### 13.1 « Java non trouvé »
+### 14.1 « Java non trouvé »
 
 ```
 ✗ ERREUR : Java non trouvé. Définissez JAVA_HOME ou lancez `nix-shell shell.nix`.
@@ -505,7 +593,7 @@ jobs:
 **Solution :** lancer le build dans le shell Nix ou installer JDK 17 et définir
 `JAVA_HOME`.
 
-### 13.2 « Android SDK non trouvé »
+### 14.2 « Android SDK non trouvé »
 
 ```
 ✗ ERREUR : Android SDK non trouvé. Définissez ANDROID_HOME [...]
@@ -513,7 +601,7 @@ jobs:
 
 **Solution :** vérifier `ANDROID_HOME` et la présence de `build-tools/34.0.0`.
 
-### 13.3 Gradle échoue avec une erreur de licence SDK
+### 14.3 Gradle échoue avec une erreur de licence SDK
 
 L'Android SDK de Nix exige d'accepter la licence. Le `shell.nix` inclut
 `config.android_sdk.accept_license = true;`. Si vous utilisez votre propre SDK,
@@ -523,7 +611,7 @@ acceptez les licences avec :
 sdkmanager --licenses
 ```
 
-### 13.4 L'APK s'installe mais ne se connecte pas
+### 14.4 L'APK s'installe mais ne se connecte pas
 
 1. Vérifiez l'URL dans `www/config.js` (doit être `http://IP:PORT` du serveur).
 2. Vérifiez que le téléphone et le serveur sont sur le même réseau.
@@ -532,7 +620,7 @@ sdkmanager --licenses
 5. Ouvrez les outils de développement Android (`chrome://inspect` sur un PC
    connecté au téléphone) pour voir les erreurs réseau dans la WebView.
 
-### 13.5 L'APK est trop gros
+### 14.5 L'APK est trop gros
 
 Le APK debug fait environ 3,6 Mo. Si vous constatez une taille anormale :
 
@@ -540,7 +628,7 @@ Le APK debug fait environ 3,6 Mo. Si vous constatez une taille anormale :
 - Passez en build release.
 - Utilisez Android App Bundle (AAB) pour Google Play au lieu d'un APK brut.
 
-### 13.6 L'APK s'installe mais l'écran reste blanc
+### 14.6 L'APK s'installe mais l'écran reste blanc
 
 1. Ouvrez les logs Android : `adb logcat`.
 2. Vérifiez que `config.js` est bien chargé avant `app.js` dans `index.html`.
@@ -548,7 +636,7 @@ Le APK debug fait environ 3,6 Mo. Si vous constatez une taille anormale :
 
 ---
 
-## 14. Différences PWA vs APK
+## 15. Différences PWA vs APK
 
 | Aspect | PWA web | APK Capacitor |
 |--------|---------|---------------|
@@ -562,7 +650,7 @@ Le APK debug fait environ 3,6 Mo. Si vous constatez une taille anormale :
 
 ---
 
-## 15. Sécurité
+## 16. Sécurité
 
 - **Ne commitez jamais le keystore** (`studio-ia.keystore`).
 - **Ne commitez jamais de mot de passe** en clair.

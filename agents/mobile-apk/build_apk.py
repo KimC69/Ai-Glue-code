@@ -54,24 +54,82 @@ def executer(cmd, cwd=None, env=None, check=True):
     return result
 
 
+def detecter_java_home():
+    """Retourne le JAVA_HOME utilisable, ou None si rien n'est trouvé."""
+    if os.environ.get("JAVA_HOME"):
+        return Path(os.environ["JAVA_HOME"])
+    java = shutil.which("java")
+    if java:
+        # On remonte de bin/java vers la racine du JDK.
+        try:
+            return Path(java).resolve().parent.parent
+        except Exception:
+            return None
+    return None
+
+
+def detecter_android_sdk():
+    """Retourne le dossier Android SDK utilisable, ou None."""
+    for var in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        sdk = os.environ.get(var)
+        if sdk and Path(sdk).is_dir():
+            return Path(sdk)
+    # Emplacements usuels par OS.
+    chemins_candidats = [
+        Path.home() / "Android" / "Sdk",
+        Path.home() / "Library" / "Android" / "sdk",
+        Path("C:/") / "Users" / Path.home().name / "AppData" / "Local" / "Android" / "Sdk",
+        Path("C:/") / "Android" / "android-sdk",
+    ]
+    for c in chemins_candidats:
+        if c.is_dir():
+            return c
+    return None
+
+
 def verifier_prerequis():
     """Vérifie que Java, Android SDK et Node sont accessibles."""
-    java = shutil.which("java")
-    if not java:
-        raise RuntimeError("Java non trouvé. Définissez JAVA_HOME ou lancez `nix-shell shell.nix`.")
-
-    sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
-    if not sdk or not Path(sdk).is_dir():
+    java_home = detecter_java_home()
+    if not java_home or not java_home.is_dir():
         raise RuntimeError(
-            "Android SDK non trouvé. Définissez ANDROID_HOME "
-            "ou lancez `nix-shell shell.nix`."
+            "Java (JDK 17) non trouvé.\n"
+            "  • Définissez JAVA_HOME, ou\n"
+            "  • placez java dans le PATH, ou\n"
+            "  • sur Replit : lancez d'abord `nix-shell shell.nix`.\n"
+            "  • sur PC local : installez OpenJDK 17 (ex: apt install openjdk-17-jdk, "
+            "Homebrew adoptopenjdk17, ou le JDK d'Android Studio)."
+        )
+
+    sdk = detecter_android_sdk()
+    if not sdk or not sdk.is_dir():
+        raise RuntimeError(
+            "Android SDK non trouvé.\n"
+            "  • Définissez ANDROID_HOME ou ANDROID_SDK_ROOT, ou\n"
+            "  • sur Replit : lancez d'abord `nix-shell shell.nix`.\n"
+            "  • sur PC local : installez Android Studio ou le SDK command-line "
+            "(build-tools 34, platform-tools, platform android-34)."
         )
 
     node = shutil.which("node") and shutil.which("npm")
     if not node:
-        raise RuntimeError("Node.js et npm sont requis.")
+        raise RuntimeError(
+            "Node.js et npm sont requis.\n"
+            "  • Téléchargez sur https://nodejs.org/ (LTS), ou\n"
+            "  • utilisez le gestionnaire de paquets de votre OS."
+        )
 
-    print(f"✓ Java  : {java}")
+    # Propager JAVA_HOME dans l'environnement des sous-processus.
+    os.environ["JAVA_HOME"] = str(java_home)
+    os.environ["ANDROID_HOME"] = str(sdk)
+    os.environ["ANDROID_SDK_ROOT"] = str(sdk)
+
+    # Si les build-tools/platform-tools ne sont pas dans le PATH, on les ajoute
+    # localement pour les commandes Gradle.
+    build_tools = next((d for d in (sdk / "build-tools").iterdir() if d.is_dir()), None)
+    if build_tools and str(build_tools) not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = f"{build_tools}:{sdk / 'platform-tools'}:{os.environ.get('PATH', '')}"
+
+    print(f"✓ Java  : {shutil.which('java')} (JAVA_HOME={java_home})")
     print(f"✓ SDK   : {sdk}")
     print(f"✓ Node  : {shutil.which('node')}")
 

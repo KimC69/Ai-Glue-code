@@ -385,7 +385,10 @@ nix-shell shell.nix --run 'python build_apk.py --api-url http://<IP-du-PC>:8000'
 ```
 
 La documentation exhaustive (prérequis, build release, signature, installation,
-CI/CD, dépannage) se trouve dans **`agents/mobile-apk/README.md`**.
+CI/CD, dépannage) se trouve dans **`agents/mobile-apk/README.md`**. Pour utiliser
+le Studio IA sans dépendre de Replit, voir aussi
+**`agents/mobile-apk/README.md` §5 « Mode 100 % local sans Replit »** et le script
+**`agents/export_local.py`** qui prépare une archive autonome.
 
 ## Application de bureau (étape 10)
 

@@ -489,7 +489,9 @@ doit être accessible publiquement via HTTPS).
 
 La documentation complète — prérequis, installation du SDK, signature du release,
 transfert sur téléphone, CI/CD GitHub Actions et dépannage — se trouve dans
-**`agents/mobile-apk/README.md`**.
+**`agents/mobile-apk/README.md`**. Pour un usage entièrement local sans Replit,
+voir **`agents/mobile-apk/README.md` §5 « Mode 100 % local sans Replit »** et le
+script **`agents/export_local.py`** qui génère `studio-ia-local.zip`.
 
 ---
 
