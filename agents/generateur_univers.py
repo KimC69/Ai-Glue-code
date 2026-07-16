@@ -39,6 +39,8 @@ def main(argv=None):
                         help="Génère le croquis mais pas la découpe 3D")
     parser.add_argument("--no-civitai", action="store_true",
                         help="Ne télécharge pas de modèle Civitai")
+    parser.add_argument("--no-3d", action="store_true",
+                        help="Ne génère pas le script/modèle Blender 3D")
     parser.add_argument("--model", default="",
                         help="Modèle OpenAI (défaut : gpt-4o-mini)")
     parser.add_argument("--lister-projets", action="store_true",
@@ -78,6 +80,7 @@ def main(argv=None):
                 generer_sd=not args.no_sd,
                 generer_decoupe=not args.no_decoupe,
                 telecharger_civitai=not args.no_civitai,
+                generer_3d=not args.no_3d,
             )
         except ErreurWorkflowUnivers as e:
             print(f"[Erreur] {e}")
@@ -120,6 +123,7 @@ def main(argv=None):
             generer_sd=not args.no_sd,
             generer_decoupe=not args.no_decoupe,
             telecharger_civitai=not args.no_civitai,
+            generer_3d=not args.no_3d,
         )
     except ErreurWorkflowUnivers as e:
         print(f"[Erreur] {e}")
@@ -142,6 +146,15 @@ def main(argv=None):
         print(f"  Découpes 3D : {', '.join(vues.keys())}")
         for nom, chemin in vues.items():
             print(f"    - {nom}: {chemin}")
+    modele_3d = bilan.get("modele_3d") or {}
+    if modele_3d.get("success"):
+        print(f"  Script Blender : {modele_3d.get('chemin_script', '')}")
+        if modele_3d.get("chemin_blend"):
+            print(f"  Modèle .blend  : {modele_3d.get('chemin_blend')}")
+        elif modele_3d.get("blender_disponible"):
+            print(f"  Blender (erreur): {modele_3d.get('erreur', '')[:80]}")
+        else:
+            print("  ℹ Blender non trouvé — ouvrez le script .py dans Blender")
     print(f"  Durée totale : {bilan.get('duree_s', 0)}s")
     print("=" * 55 + "\n")
 

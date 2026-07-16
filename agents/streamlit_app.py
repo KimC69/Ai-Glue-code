@@ -27,6 +27,7 @@ from univers.projet_manager import (
     lire_fiche, chemin_modeles, CATEGORIES
 )
 from univers.orchestrateur_univers import OrchestrateurUnivers, ErreurWorkflowUnivers
+from univers.projet_manager import chemin_3d
 
 
 # ── Configuration de la page ───────────────────────────────────────────────
@@ -115,6 +116,8 @@ with tab_generer:
         activer_civitai = st.checkbox("Télécharger un modèle Civitai adapté", value=True)
     with col_options2:
         activer_decoupe = st.checkbox("Découper le croquis en vues 3D", value=True)
+        activer_3d = st.checkbox("Générer le modèle Blender 3D", value=True,
+                                 help="Génère un script Python Blender (.py) et le .blend si Blender est installé.")
         model_override = st.text_input("Modèle OpenAI (optionnel)",
                                        value=st.session_state.cfg.model_openai)
 
@@ -157,6 +160,7 @@ with tab_generer:
                             generer_sd=activer_sd,
                             generer_decoupe=activer_decoupe,
                             telecharger_civitai=activer_civitai,
+                            generer_3d=activer_3d,
                         )
                     except ErreurWorkflowUnivers as e:
                         st.error(f"Erreur workflow : {e}")
@@ -184,6 +188,36 @@ with tab_generer:
 
                 if not bilan.get("croquis", {}).get("success") and activer_sd:
                     st.warning(bilan.get("croquis", {}).get("error", "Échec de la génération d'image."))
+
+                m3d = bilan.get("modele_3d") or {}
+                if m3d.get("success"):
+                    st.subheader("🧊 Modèle Blender 3D")
+                    if m3d.get("chemin_blend"):
+                        st.success(f"✅ .blend généré → `{m3d['chemin_blend']}`")
+                    elif m3d.get("blender_disponible"):
+                        st.warning(f"Blender a échoué : {m3d.get('erreur', '')[:200]}")
+                    else:
+                        st.info(
+                            f"Script prêt → `{m3d['chemin_script']}`\n\n"
+                            "Blender n'est pas installé. Exécutez le script dans Blender "
+                            "ou depuis un terminal :\n"
+                            f"```bash\nblender --background --python {os.path.basename(m3d['chemin_script'])}\n```"
+                        )
+                    with st.expander("Détails de la modélisation"):
+                        col_a, col_b = st.columns(2)
+                        col_a.metric("Taille", f"{m3d.get('taille_cm', '?')} cm")
+                        col_b.metric("Poids", f"{m3d.get('poids_kg', '?')} kg")
+                        if m3d.get("couleurs"):
+                            st.markdown("**Couleurs extraites (RGB 0-1)**")
+                            for rgb in m3d["couleurs"]:
+                                r, g, b = [int(c * 255) for c in rgb]
+                                st.markdown(
+                                    f'<span style="display:inline-block;width:20px;height:20px;'
+                                    f'background:rgb({r},{g},{b});border-radius:3px;'
+                                    f'margin-right:8px;vertical-align:middle;border:1px solid #ccc"></span>'
+                                    f'rgb({r}, {g}, {b})',
+                                    unsafe_allow_html=True
+                                )
 
     else:  # Mode scénario
         with st.form("form_scenario"):
@@ -230,6 +264,7 @@ with tab_generer:
                         generer_sd=activer_sd,
                         generer_decoupe=activer_decoupe,
                         telecharger_civitai=activer_civitai,
+                        generer_3d=activer_3d,
                     )
                 except ErreurWorkflowUnivers as e:
                     st.error(f"Erreur workflow : {e}")
@@ -353,6 +388,48 @@ with tab_explorer:
                             cols = st.columns(len(decoupes))
                             for col, (nom, chemin) in zip(cols, decoupes):
                                 col.image(chemin, caption=nom.capitalize(), use_container_width=True)
+
+                        # ── Bouton Générer modèle Blender 3D ──────────────
+                        dossier_blender = chemin_3d(projet, categorie, nom_base)
+                        import re as _re
+                        nom_safe = _re.sub(r"[^\w\-]", "_", nom_base)
+                        blend_existant = os.path.join(dossier_blender, f"{nom_safe}.blend")
+                        script_existant = os.path.join(dossier_blender, f"{nom_safe}_blender.py")
+
+                        st.markdown("---")
+                        st.markdown("**🧊 Modèle Blender 3D**")
+                        if os.path.isfile(blend_existant):
+                            st.success(f"✅ `.blend` disponible → `{blend_existant}`")
+                        elif os.path.isfile(script_existant):
+                            st.info(f"Script prêt → `{script_existant}` (Blender nécessaire pour créer le .blend)")
+                        else:
+                            btn_key = f"btn_3d_{categorie}_{nom_base}"
+                            if st.button("⚙️ Générer le modèle Blender 3D", key=btn_key):
+                                vues_dispo = {
+                                    nom_v: os.path.join(
+                                        projet["chemin"], "sketches", categorie,
+                                        "decoupes", f"{nom_base}_{nom_v}.png")
+                                    for nom_v in ["face", "profile", "back"]
+                                    if os.path.isfile(os.path.join(
+                                        projet["chemin"], "sketches", categorie,
+                                        "decoupes", f"{nom_base}_{nom_v}.png"))
+                                }
+                                cfg_gen = st.session_state.cfg
+                                from univers.agents.modelisateur_blender import ModelisateurBlender
+                                modelisateur = ModelisateurBlender(model=cfg_gen.model_openai)
+                                with st.spinner(f"Génération du script Blender pour {nom_base}..."):
+                                    r3d = modelisateur.generer(
+                                        fiche=fiche,
+                                        vues=vues_dispo,
+                                        dossier_3d=dossier_blender,
+                                    )
+                                if r3d.chemin_blend:
+                                    st.success(f"✅ .blend généré → `{r3d.chemin_blend}`")
+                                else:
+                                    st.info(f"Script généré → `{r3d.chemin_script}`")
+                                    if not r3d.blender_disponible:
+                                        st.caption("Blender non trouvé. Exécutez le script manuellement.")
+                                st.rerun()
                     else:
                         st.caption("Aucun croquis généré pour cette fiche.")
 

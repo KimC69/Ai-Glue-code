@@ -7,6 +7,7 @@ Exécute la chaîne d'agents spécialisés dans l'ordre :
 3. Prompteur               → prompt SD de croquis
 4. Dessinateur SD          → image PNG
 5. Découpeur 3D            → vues face/profil/dos
+6. Modélisateur Blender    → script .py + .blend aux bonnes dimensions
 
 Chaque étape est tracée et les résultats sont rangés dans la structure du projet.
 """
@@ -19,13 +20,14 @@ from typing import Optional
 from .config import ConfigUnivers
 from .projet_manager import (
     creer_ou_ouvrir, sauver_fiche, chemin_croquis, chemin_modeles,
-    CATEGORIES
+    chemin_3d, CATEGORIES
 )
 from .agents.redacteur_fiche import RedacteurFiche
 from .agents.curateur_civitai import CurateurCivitai
 from .agents.prompteur import Prompteur
 from .agents.dessinateur_sd import DessinateurSD
 from .agents.decoupeur_3d import Decoupeur3D
+from .agents.modelisateur_blender import ModelisateurBlender
 from .agents.scenariste_univers import ScenaristeUnivers
 
 
@@ -48,8 +50,9 @@ class OrchestrateurUnivers:
     def executer(self, nom_projet: str, nom_entite: str, categorie: str,
                  type_entite: str, description: str,
                  generer_sd: bool = True, generer_decoupe: bool = True,
-                 telecharger_civitai: bool = True) -> dict:
-        """Lance le workflow complet pour une entité.
+                 telecharger_civitai: bool = True,
+                 generer_3d: bool = True) -> dict:
+        """Lance le workflow complet pour une entité (6 étapes).
 
         Retourne un dict avec les chemins et les résultats intermédiaires.
         """
@@ -71,6 +74,7 @@ class OrchestrateurUnivers:
             "prompt": None,
             "croquis": None,
             "decoupes": None,
+            "modele_3d": None,
             "duree_s": 0,
             "etapes": [],
         }
@@ -141,7 +145,7 @@ class OrchestrateurUnivers:
 
         # ── Étape 5 : Découpeur 3D ───────────────────────────────────────────
         if generer_decoupe and bilan["croquis"] and bilan["croquis"].get("success"):
-            self._log("Étape 5/5 — Découpe du croquis en vues orthographiques...")
+            self._log("Étape 5/6 — Découpe du croquis en vues orthographiques...")
             decoupeur = Decoupeur3D(model=self.config.model_openai)
             resultat_decoupe = decoupeur.decouper(
                 chemin_image=bilan["croquis"]["chemin"],
@@ -154,7 +158,41 @@ class OrchestrateurUnivers:
             else:
                 self._log(f"Découpeur 3D : {resultat_decoupe.get('error', 'échec')}")
         else:
-            self._log("Étape 5/5 — Découpe 3D désactivée ou impossible.")
+            self._log("Étape 5/6 — Découpe 3D désactivée ou impossible.")
+
+        # ── Étape 6 : Modélisateur Blender ──────────────────────────────────
+        if generer_3d and bilan["fiche"]:
+            self._log("Étape 6/6 — Génération du script Blender 3D...")
+            fiche_dict = bilan["fiche"]["contenu"]
+            vues_dict = (bilan["decoupes"] or {}).get("vues", {})
+            dossier_blender = chemin_3d(projet, categorie, nom_entite)
+            modelisateur = ModelisateurBlender(model=self.config.model_openai)
+            resultat_3d = modelisateur.generer(
+                fiche=fiche_dict,
+                vues=vues_dict,
+                dossier_3d=dossier_blender,
+            )
+            bilan["modele_3d"] = {
+                "chemin_script": resultat_3d.chemin_script,
+                "chemin_blend": resultat_3d.chemin_blend,
+                "dossier_3d": resultat_3d.dossier_3d,
+                "taille_cm": resultat_3d.taille_cm,
+                "poids_kg": resultat_3d.poids_kg,
+                "couleurs": resultat_3d.couleurs,
+                "blender_disponible": resultat_3d.blender_disponible,
+                "blender_version": resultat_3d.blender_version,
+                "erreur": resultat_3d.erreur,
+                "success": True,
+            }
+            if resultat_3d.blender_disponible and resultat_3d.chemin_blend:
+                self._log(f"Modèle .blend généré → {resultat_3d.chemin_blend}")
+            elif resultat_3d.blender_disponible:
+                self._log(f"Blender a échoué : {resultat_3d.erreur[:100]}")
+            else:
+                self._log(f"Script Blender prêt → {resultat_3d.chemin_script}")
+                self._log("  (Blender non trouvé — ouvrez le script dans Blender pour créer le .blend)")
+        else:
+            self._log("Étape 6/6 — Modélisation Blender désactivée.")
 
         bilan["duree_s"] = round(time.time() - debut_total, 2)
         bilan["etapes"] = self.etapes
@@ -163,14 +201,16 @@ class OrchestrateurUnivers:
     def generer_seulement_fiche(self, nom_projet: str, nom_entite: str,
                                 categorie: str, type_entite: str,
                                 description: str) -> dict:
-        """Mode rapide : uniquement la fiche JSON, sans image."""
+        """Mode rapide : uniquement la fiche JSON, sans image ni 3D."""
         return self.executer(
             nom_projet, nom_entite, categorie, type_entite, description,
-            generer_sd=False, generer_decoupe=False, telecharger_civitai=False)
+            generer_sd=False, generer_decoupe=False,
+            telecharger_civitai=False, generer_3d=False)
 
     def executer_scenario(self, nom_projet: str, chemin_scenario: str,
                           generer_sd: bool = True, generer_decoupe: bool = True,
-                          telecharger_civitai: bool = True) -> dict:
+                          telecharger_civitai: bool = True,
+                          generer_3d: bool = True) -> dict:
         """Lance le workflow complet sur toutes les entités extraites d'un scénario.
 
         Retourne un bilan global avec la liste des entités traitées et les erreurs.
@@ -209,6 +249,7 @@ class OrchestrateurUnivers:
                 generer_sd=generer_sd,
                 generer_decoupe=generer_decoupe,
                 telecharger_civitai=telecharger_civitai,
+                generer_3d=generer_3d,
             )
             if resultat.get("fiche"):
                 bilan["succes"] += 1

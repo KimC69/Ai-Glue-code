@@ -87,3 +87,34 @@ class ResultatDecoupe(BaseModel):
 
     vues: dict = Field(description="Dict {'face': chemin, 'profile': chemin, 'back': chemin, ...}")
     dimensions: dict = Field(default_factory=dict, description="Dimensions de l'image source")
+
+
+class ResultatModelisation3D(BaseModel):
+    """Résultat de la modélisation Blender 3D d'une entité."""
+
+    chemin_script: str = Field(description="Chemin absolu du script Python Blender (.py)")
+    chemin_blend: str = Field(
+        default="", description="Chemin absolu du fichier .blend (vide si Blender absent)")
+    dossier_3d: str = Field(description="Dossier de sortie 3D de l'entité")
+
+    # Dimensions réelles utilisées
+    taille_cm: int = Field(default=170, description="Taille en cm utilisée pour l'échelle Blender")
+    poids_kg: float = Field(default=70.0, description="Poids en kg utilisé pour les proportions")
+
+    # Couleurs extraites de la fiche et appliquées comme matériaux
+    couleurs: list = Field(
+        default_factory=list,
+        description="Liste des couleurs RGB appliquées (ex: [[0.8, 0.7, 0.6], ...])")
+
+    # Vues de référence positionnées dans Blender
+    vues_reference: dict = Field(
+        default_factory=dict,
+        description="Dict {'face': chemin_png, 'profile': chemin_png, 'back': chemin_png}")
+
+    # Statut de l'exécution Blender
+    blender_disponible: bool = Field(
+        default=False,
+        description="True si Blender a été exécuté automatiquement en mode headless")
+    blender_version: str = Field(
+        default="", description="Version de Blender détectée (ex: 4.1.0)")
+    erreur: str = Field(default="", description="Message d'erreur éventuel")

@@ -160,6 +160,12 @@ def chemin_modeles(projet: dict) -> str:
     return os.path.join(projet["chemin"], "models")
 
 
+def chemin_3d(projet: dict, categorie: str, nom_entite: str) -> str:
+    """Chemin du dossier de modélisation 3D Blender d'une entité."""
+    nom_safe = re.sub(r"[^\w\-]", "_", nom_entite)
+    return os.path.join(projet["chemin"], "models", "3d", categorie, nom_safe)
+
+
 def sauver_fiche(projet: dict, categorie: str, nom: str, contenu: dict) -> str:
     """Enregistre une fiche JSON dans la bible du projet."""
     chemin = chemin_bible(projet, categorie, nom)
