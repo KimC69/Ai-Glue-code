@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "description": "Versions minimales requises par le Studio IA. Utilisé par bootstrap.py pour vérifier et réparer l'environnement automatiquement sur un nouveau PC.",
+  "logiciels": [
+    {
+      "id": "blender",
+      "nom": "Blender",
+      "version_min": "4.0.0",
+      "commandes_detection": ["blender", "blender3d"],
+      "arg_version": "--version",
+      "regex_version": "Blender\\s+(\\d+\\.\\d+(?:\\.\\d+)?)",
+      "url_telechargement": "https://www.blender.org/download/",
+      "install_linux_apt": "blender",
+      "install_note": "Téléchargez depuis https://www.blender.org/download/ ou installez via votre gestionnaire de paquets.",
+      "obligatoire": false
+    },
+    {
+      "id": "comfyui",
+      "nom": "ComfyUI",
+      "type": "service_http",
+      "url_defaut": "http://127.0.0.1:8188",
+      "env_var_url": "STUDIO_SD_URL",
+      "url_github": "https://github.com/comfyanonymous/ComfyUI",
+      "install_note": "Clonez depuis https://github.com/comfyanonymous/ComfyUI et lancez python main.py",
+      "obligatoire": false
+    },
+    {
+      "id": "automatic1111",
+      "nom": "Stable Diffusion WebUI (A1111 / Forge)",
+      "type": "service_http",
+      "url_defaut": "http://127.0.0.1:7860",
+      "env_var_url": "STUDIO_SD_URL_ALT",
+      "url_github": "https://github.com/AUTOMATIC1111/stable-diffusion-webui",
+      "install_note": "Clonez depuis https://github.com/AUTOMATIC1111/stable-diffusion-webui et lancez webui.sh",
+      "obligatoire": false
+    },
+    {
+      "id": "python_packages",
+      "nom": "Paquets Python (requirements.txt)",
+      "type": "pip",
+      "fichier_requirements": "requirements.txt",
+      "packages_critiques": [
+        "langchain",
+        "langchain-openai",
+        "pydantic",
+        "streamlit",
+        "pillow"
+      ],
+      "obligatoire": true
+    }
+  ]
+}

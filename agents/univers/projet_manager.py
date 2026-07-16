@@ -216,3 +216,40 @@ def lister_modeles(projet: dict) -> list:
         return [f for f in os.listdir(dossier) if f.endswith(".safetensors")]
     except OSError:
         return []
+
+
+# ── Manifeste des modèles (portabilité) ────────────────────────────────────
+
+def chemin_manifest(projet: dict) -> str:
+    """Chemin du fichier manifeste des modèles téléchargés."""
+    return os.path.join(projet["chemin"], "manifest_modeles.json")
+
+
+def lire_manifest(projet: dict) -> dict:
+    """Lit le manifeste des modèles (« échoue sûr »)."""
+    chemin = chemin_manifest(projet)
+    try:
+        with open(chemin, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and "modeles" in data:
+            return data
+    except (OSError, ValueError):
+        pass
+    return {"version": 1, "modeles": []}
+
+
+def enregistrer_dans_manifest(projet: dict, entree: dict) -> None:
+    """Ajoute ou met à jour une entrée dans le manifeste (par fichier_nom)."""
+    manifest = lire_manifest(projet)
+    modeles = manifest.get("modeles", [])
+
+    # Remplace si même nom de fichier, sinon ajoute
+    nom = entree.get("fichier_nom", "")
+    modeles = [m for m in modeles if m.get("fichier_nom") != nom]
+    modeles.append(entree)
+    manifest["modeles"] = modeles
+
+    _ecrire_atomique(
+        chemin_manifest(projet),
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+    )

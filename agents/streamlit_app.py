@@ -24,10 +24,12 @@ import streamlit as st
 from univers.config import ConfigUnivers, config_defaut
 from univers.projet_manager import (
     creer_ou_ouvrir, lister_projets, lister_fiches, lister_croquis,
-    lire_fiche, chemin_modeles, CATEGORIES
+    lire_fiche, chemin_modeles, CATEGORIES, chemin_manifest, lire_manifest,
 )
 from univers.orchestrateur_univers import OrchestrateurUnivers, ErreurWorkflowUnivers
 from univers.projet_manager import chemin_3d
+from univers.agents.synchroniseur_modeles import SynchroniseurModeles
+from bootstrap import BootstrapEnvironnement
 
 
 # ── Configuration de la page ───────────────────────────────────────────────
@@ -99,9 +101,36 @@ else:
     st.stop()
 
 
+# ── Bannière bootstrap : nouveau PC détecté ──────────────────────────────
+if not BootstrapEnvironnement.est_valide():
+    with st.container():
+        col_warn, col_btn = st.columns([3, 1])
+        with col_warn:
+            st.warning(
+                "⚠️ **Environnement non vérifié.** "
+                "C'est peut-être un nouveau PC ou une nouvelle installation. "
+                "Vérifiez que Blender et les paquets Python sont bien présents."
+            )
+        with col_btn:
+            if st.button("🔍 Vérifier l'environnement", use_container_width=True):
+                bs = BootstrapEnvironnement()
+                with st.spinner("Vérification en cours…"):
+                    rapport = bs.verifier_tout()
+                if rapport["tous_ok"]:
+                    bs.marquer_valide()
+                    st.success("✅ Environnement prêt !")
+                    st.rerun()
+                else:
+                    nb_problemes = sum(
+                        1 for i in rapport["items"]
+                        if i["statut"] not in ("ok", "non_verifie")
+                    )
+                    st.error(f"{nb_problemes} problème(s) détecté(s). Consultez l'onglet 🖥️ Environnement.")
+
+
 # ── Onglets principaux ────────────────────────────────────────────────────
-tab_generer, tab_config, tab_explorer = st.tabs(
-    ["✨ Générer une entité", "⚙️ Configuration", "🔍 Explorateur de projet"]
+tab_generer, tab_config, tab_explorer, tab_env = st.tabs(
+    ["✨ Générer une entité", "⚙️ Configuration", "🔍 Explorateur de projet", "🖥️ Environnement"]
 )
 
 
@@ -435,13 +464,194 @@ with tab_explorer:
 
     st.divider()
     st.subheader("Modèles téléchargés")
+    manifest = lire_manifest(projet)
+    entrees_manifest = manifest.get("modeles", [])
     dossier_modeles = chemin_modeles(projet)
-    if os.path.isdir(dossier_modeles):
+
+    if entrees_manifest:
+        # Affiche les modèles depuis le manifeste (avec statut)
+        for entree in entrees_manifest:
+            nom = entree.get("fichier_nom", "?")
+            chemin_rel = entree.get("chemin_relatif", os.path.join("models", nom))
+            chemin_abs = os.path.join(projet["chemin"], chemin_rel)
+            present = os.path.isfile(chemin_abs)
+            taille_mb = round(entree.get("taille_octets", 0) / 1024 / 1024, 1)
+            icone = "✅" if present else "❌"
+            date = entree.get("date_telechargement", "")[:10]
+            st.markdown(
+                f"{icone} `{nom}` "
+                f"{'(' + str(taille_mb) + ' Mo)' if taille_mb else ''} "
+                f"{'— ' + date if date else ''}"
+            )
+            if not present:
+                st.caption(f"   ⚠️ Absent du disque — utilisez 'Synchroniser les modèles' dans l'onglet 🖥️ Environnement pour re-télécharger.")
+    elif os.path.isdir(dossier_modeles):
+        # Fallback : lecture directe du dossier (modèles téléchargés avant le manifeste)
         modeles = [f for f in os.listdir(dossier_modeles) if f.endswith(".safetensors")]
         if modeles:
             for m in modeles:
-                st.markdown(f"- `{m}`")
+                st.markdown(f"✅ `{m}` _(pas dans le manifeste — re-téléchargement impossible)_")
         else:
             st.caption("Aucun modèle dans ce projet.")
     else:
         st.caption("Aucun modèle dans ce projet.")
+
+
+# ── Onglet : Environnement ─────────────────────────────────────────────────
+with tab_env:
+    st.header("🖥️ Environnement logiciel")
+    st.markdown(
+        "Vérifie que tous les logiciels requis sont présents et à la bonne version. "
+        "Sur un nouveau PC, utilisez **Réparer l'environnement** pour installer les composants manquants."
+    )
+
+    col_btn1, col_btn2, _ = st.columns([1, 1, 2])
+    with col_btn1:
+        lancer_verif = st.button("🔍 Vérifier l'environnement", use_container_width=True)
+    with col_btn2:
+        lancer_reparation = st.button("🔧 Réparer l'environnement", use_container_width=True,
+                                      help="Tente d'installer automatiquement les composants manquants (Linux).")
+
+    if lancer_verif or lancer_reparation:
+        bs = BootstrapEnvironnement()
+        with st.spinner("Vérification en cours…"):
+            rapport = bs.verifier_tout()
+
+        st.subheader("Résultat de la vérification")
+        for item in rapport["items"]:
+            icone = {"ok": "✅", "absent": "❌", "vieux": "⚠️", "non_verifie": "ℹ️"}.get(item["statut"], "?")
+            col_ic, col_msg, col_ver = st.columns([0.5, 3, 1])
+            with col_ic:
+                st.markdown(icone)
+            with col_msg:
+                st.markdown(f"**{item['nom']}** — {item['message']}")
+                if item.get("action"):
+                    st.caption(f"→ {item['action']}")
+            with col_ver:
+                if item.get("version_trouvee"):
+                    st.caption(item["version_trouvee"])
+                if item.get("version_min"):
+                    st.caption(f"min : {item['version_min']}")
+
+        if lancer_reparation:
+            st.divider()
+            st.subheader("Réparation automatique")
+            messages_reparation = []
+            for item in rapport["items"]:
+                if item["statut"] in ("absent", "vieux"):
+                    if item["id"] == "blender":
+                        msg = bs.reparer_blender_linux()
+                        messages_reparation.append(msg)
+                    elif item["id"] == "python_packages":
+                        msg = bs.reparer_pip()
+                        messages_reparation.append(msg)
+                    elif item["id"] in ("comfyui", "automatic1111"):
+                        messages_reparation.append(
+                            f"ℹ️ {item['nom']} doit être installé manuellement. "
+                            f"{item.get('action', '')}"
+                        )
+            for msg in messages_reparation:
+                st.markdown(msg)
+
+            # Re-vérifie après réparation
+            with st.spinner("Nouvelle vérification…"):
+                rapport = bs.verifier_tout()
+
+        if rapport["tous_ok"]:
+            bs.marquer_valide()
+            st.success("✅ Environnement validé — le fichier .studio_env_validated a été créé.")
+        else:
+            st.warning("⚠️ Certains composants sont encore manquants. Consultez les actions ci-dessus.")
+
+    st.divider()
+    st.subheader("🔄 Synchronisation des modèles Civitai")
+    st.markdown(
+        "Sur un nouveau PC, les modèles `.safetensors` peuvent être absents du disque. "
+        "Le manifeste du projet liste tous les modèles téléchargés avec leur URL d'origine. "
+        "Cliquez sur **Synchroniser** pour re-télécharger automatiquement les modèles manquants."
+    )
+
+    manifest_env = lire_manifest(projet)
+    entrees_env = manifest_env.get("modeles", [])
+
+    if not entrees_env:
+        st.info("Aucun modèle dans le manifeste de ce projet. Les futurs téléchargements Civitai y seront enregistrés automatiquement.")
+    else:
+        sync = SynchroniseurModeles(st.session_state.cfg)
+        with st.spinner("Vérification du manifeste…"):
+            rapport_sync = sync.verifier(projet)
+
+        st.markdown(f"**{SynchroniseurModeles.resumer_rapport(rapport_sync)}**")
+
+        nb_a_telecharger = len(rapport_sync["manquants"]) + len(rapport_sync["corrompus"])
+
+        col_s1, col_s2 = st.columns([2, 1])
+        with col_s1:
+            if rapport_sync["manquants"]:
+                st.warning(f"❌ {len(rapport_sync['manquants'])} modèle(s) absent(s) du disque")
+                for e in rapport_sync["manquants"]:
+                    st.caption(f"  • {e.get('fichier_nom', '?')}")
+            if rapport_sync["corrompus"]:
+                st.warning(f"⚠️ {len(rapport_sync['corrompus'])} modèle(s) corrompu(s) (hash invalide)")
+            if rapport_sync["presents"]:
+                st.success(f"✅ {len(rapport_sync['presents'])} modèle(s) présent(s) et valide(s)")
+        with col_s2:
+            if nb_a_telecharger > 0:
+                if st.button(
+                    f"⬇️ Synchroniser ({nb_a_telecharger} modèle(s))",
+                    use_container_width=True,
+                    type="primary",
+                ):
+                    messages_dl = []
+                    progress = st.progress(0)
+                    status_txt = st.empty()
+
+                    def _callback(msg):
+                        messages_dl.append(msg)
+                        status_txt.text(msg)
+
+                    resultats_dl = sync.reparer(projet, rapport_sync, callback_progres=_callback)
+                    progress.progress(1.0)
+
+                    if resultats_dl["retelecharges"]:
+                        st.success(f"✅ {len(resultats_dl['retelecharges'])} modèle(s) téléchargé(s) avec succès.")
+                    if resultats_dl["echecs"]:
+                        for err in resultats_dl["echecs"]:
+                            st.error(f"❌ {err['nom']} : {err['erreur'][:200]}")
+                    if resultats_dl["ignores"]:
+                        st.info(f"ℹ️ {len(resultats_dl['ignores'])} modèle(s) ignoré(s) (pas d'URL).")
+                    st.rerun()
+            else:
+                st.success("Tous les modèles sont présents ✅")
+
+    st.divider()
+    st.subheader("ℹ️ Comment transférer le studio sur un nouveau PC")
+    with st.expander("Guide de portabilité"):
+        st.markdown("""
+**1. Copiez le dossier du projet**
+Copiez l'intégralité du dossier `agents/output/projects/[votre-projet]/` sur le nouveau PC.
+Ce dossier contient les fiches JSON, croquis, scripts Blender **et** le manifeste des modèles.
+
+**2. Copiez (ou re-téléchargez) les modèles**
+- Si vous avez la place, copiez aussi les fichiers `.safetensors` depuis `models/`.
+- Sinon, laissez-les vides : le studio les re-téléchargera automatiquement depuis Civitai
+  grâce au manifeste (`manifest_modeles.json`).
+
+**3. Vérifiez l'environnement**
+Sur le nouveau PC, ouvrez le Studio IA. La bannière de vérification apparaît automatiquement.
+Cliquez sur **Réparer l'environnement** pour installer Blender et les paquets Python manquants.
+
+**4. Synchronisez les modèles**
+Cliquez sur **Synchroniser** dans cet onglet pour re-télécharger les modèles manquants depuis Civitai.
+
+**Ce qui suit automatiquement :**
+- ✅ Fiches JSON des entités (bible du projet)
+- ✅ Croquis générés (.png)
+- ✅ Scripts Blender (.py) et modèles 3D (.blend)
+- ✅ Manifeste des modèles Civitai (URLs + hash)
+- ✅ Configuration du studio (config.json)
+
+**Ce qui ne suit pas (trop lourd) :**
+- ⚠️ Les fichiers .safetensors (2-8 Go) — re-téléchargement automatique depuis Civitai
+- ⚠️ Blender, ComfyUI, A1111 — réinstallation automatique via l'onglet Environnement
+        """)

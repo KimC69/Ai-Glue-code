@@ -6,14 +6,18 @@ modèle (ex : pencil sketch), télécharge le fichier .safetensors dans le dossi
 `/projects/[projet]/models/`, et prépare le chargement auprès de Stable Diffusion.
 """
 
-import sys
+import hashlib
+import json
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from agent_base import BaseAgent
 from univers.civitai_client import CivitaiClient, ErreurCivitai
 from univers.config import ConfigUnivers
+from univers.projet_manager import enregistrer_dans_manifest
 from pydantic import BaseModel, Field
+from datetime import datetime, timezone
 
 
 class CurateurCivitai(BaseAgent):
@@ -77,6 +81,25 @@ Sortie JSON obligatoire avec deux clés : "query" et "type_modele".
                 "error": str(e),
             }
 
+        # ── Calcul du hash SHA256 et enregistrement dans le manifeste ──
+        hash_sha256 = self._calculer_sha256(chemin_local)
+        taille_octets = os.path.getsize(chemin_local) if os.path.exists(chemin_local) else 0
+        chemin_relatif = os.path.relpath(chemin_local, projet["chemin"])
+        try:
+            enregistrer_dans_manifest(projet, {
+                "fichier_nom": modele["fichier_nom"],
+                "nom_modele": modele.get("nom", ""),
+                "version_id": modele.get("version_id"),
+                "download_url": modele["download_url"],
+                "hash_sha256": hash_sha256,
+                "taille_octets": taille_octets,
+                "chemin_relatif": chemin_relatif,
+                "type": modele.get("type", "Checkpoint"),
+                "date_telechargement": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            })
+        except Exception:
+            pass  # Le manifeste est optionnel — l'échec ne bloque pas la génération
+
         return {
             "success": True,
             "query": query,
@@ -84,6 +107,18 @@ Sortie JSON obligatoire avec deux clés : "query" et "type_modele".
             "chemin_local": chemin_local,
             "nom_checkpoint": modele["fichier_nom"],
         }
+
+    @staticmethod
+    def _calculer_sha256(chemin: str) -> str:
+        """Calcule le hash SHA256 d'un fichier (bloc par bloc pour les gros fichiers)."""
+        h = hashlib.sha256()
+        try:
+            with open(chemin, "rb") as f:
+                for bloc in iter(lambda: f.read(65536), b""):
+                    h.update(bloc)
+            return h.hexdigest()
+        except OSError:
+            return ""
 
     def discuter(self, message: str, role: str = "", contexte: str = "") -> str:
         return super().discuter(message, role or "Curateur Civitai", contexte)
