@@ -346,6 +346,23 @@ curl -H "Authorization: Bearer $JETON" http://localhost:8000/productions/<id>
 > Note : le sous-processus de production a besoin des dépendances du pipeline
 > (langchain…) installées ; l'API et l'authentification, elles, n'en ont pas.
 
+## Générateur d'Univers (Stable Diffusion + Civitai)
+
+Un workflow indépendant, accessible via **Streamlit** (`streamlit_app.py`) ou en CLI
+(`generateur_univers.py`), pour créer des fiches d'identité et des croquis
+techniques cloisonnés par projet :
+
+```bash
+cd agents
+streamlit run streamlit_app.py --server.port 5000
+# ou en CLI :
+python generateur_univers.py --projet "MonJeu" --nom "Kael" \
+  --categorie characters --type "Humain" --description "..."
+```
+
+Voir [`univers/README.md`](univers/README.md) pour le détail des agents, de la
+structure de dossiers et de la configuration Stable Diffusion / Civitai.
+
 ## Application mobile (PWA — étape 9) + APK Android
 
 Une **télécommande mobile** (Progressive Web App) servie directement par l'API :

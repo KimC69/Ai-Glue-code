@@ -547,7 +547,64 @@ optionnels, objectifs & mémoire, et chat avec un agent. Restent volontairement
 
 ---
 
-## 12. Sécurité et modèle de menace
+## 12. Générateur d'Univers (Stable Diffusion + Civitai)
+
+Workflow **indépendant** du pipeline cinéma, destiné à produire des fiches d'identité
+et des croquis techniques cloisonnés par projet. Accessible en **Streamlit**
+(`agents/streamlit_app.py`) ou en **CLI** (`agents/generateur_univers.py`).
+
+### Structure par projet
+
+```
+output/projects/[NOM_DU_PROJET]/
+├── universe_bible/
+│   ├── characters/     # Fiches JSON (humains, animaux, insectes)
+│   ├── objects/        # Fiches JSON (reliques, outils)
+│   └── flora/          # Fiches JSON (végétation)
+├── sketches/
+│   ├── characters/     # Croquis PNG
+│   ├── objects/
+│   └── flora/
+└── models/             # Modèles Civitai (.safetensors)
+```
+
+### Agents du workflow
+
+| Agent | Rôle |
+|---|---|
+| Rédacteur de Fiche | Génère la fiche JSON d'identité complète |
+| Curateur Civitai | Cherche et télécharge un modèle de style adapté |
+| Prompteur | Traduit la fiche en prompt SD « croquis technique isolé » |
+| Dessinateur SD | Génère le croquis via ComfyUI ou A1111/Forge |
+| Découpeur 3D | Découpe le croquis en vues face/profil/dos |
+
+### Règles de génération
+
+- **Uniquement des croquis techniques** : pencil sketch, line art, technical drawing, isolated on white background.
+- **Jamais** de scènes, d'arrière-plans, d'illustrations finales ou de couleurs.
+- Le prompt négatif interdit explicitement : `background, scene, landscape, environment, colors, painting, blurry, low quality`.
+
+### Lancement
+
+```bash
+cd agents
+streamlit run streamlit_app.py --server.port 5000
+
+# ou CLI :
+python generateur_univers.py --projet "MonJeu" --nom "Kael" \
+  --categorie characters --type "Humain" --description "..."
+```
+
+### Configuration
+
+- `STUDIO_SD_BACKEND` : `comfyui`, `automatic1111`, `forge` ou `auto`
+- `STUDIO_SD_URL` / `STUDIO_SD_URL_ALT` : URLs des backends SD
+- `STUDIO_CIVITAI_URL` / `STUDIO_CIVITAI_API_KEY` : Civitai
+- `STUDIO_MODEL_OPENAI` : modèle OpenAI pour les agents rédacteurs
+
+---
+
+## 13. Sécurité et modèle de menace
 
 - **Mots de passe** : jamais en clair, hachés pbkdf2-hmac-sha256 + sel par
   utilisateur. Jamais passés en argument de ligne de commande.
@@ -567,7 +624,7 @@ Un modèle de menace plus détaillé peut être généré séparément (`threat_
 
 ---
 
-## 13. Tests
+## 14. Tests
 
 L'infrastructure est testable **sans aucune dépendance ni clé LLM** (elle
 n'utilise que la bibliothèque standard). Les suites couvrent :
@@ -588,7 +645,7 @@ aussi `python -m py_compile`.
 
 ---
 
-## 14. Dépannage (FAQ)
+## 15. Dépannage (FAQ)
 
 **L'API refuse de démarrer.** → `SESSION_SECRET` est absent. Définissez-le
 (`export SESSION_SECRET=...`). C'est volontaire (échoue fermé).
@@ -612,7 +669,7 @@ secret signe les jetons ; le changer invalide tous les jetons existants.
 
 ---
 
-## 15. Publier sur GitHub
+## 16. Publier sur GitHub
 
 1. **Vérifiez le `.gitignore`** (fourni dans `agents/.gitignore`) : il exclut
    `.env`, `output/` et les caches Python. **Ne committez jamais** de secret ni
@@ -631,7 +688,7 @@ secret signe les jetons ; le changer invalide tous les jetons existants.
 
 ---
 
-## 16. Feuille de route
+## 17. Feuille de route
 
 Le projet suit une feuille de route en 10 étapes.
 

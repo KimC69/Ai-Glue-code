@@ -3,3 +3,4 @@
 - [Contrôle inter-processus](controle-inter-processus.md) — pilotage prod détachée par fichier de commande ; écriture échoue-fermé (tmp uuid), lecture échoue-sûr, pause = reprendre explicite, garde-fous DESTRUCTIFS échouent-fermé.
 - [Dossiers par projet + suite](dossiers-par-projet.md) — film isolé dans output/projets/<slug>/ ; scripts via STUDIO_OUTPUT_DIR/dossier_sortie() ; archive depuis état EN MÉMOIRE (pas le fichier global) ; suite = référence injectée, échoue-fermé.
 - [Objectifs admin-only](objectifs-admin-only.md) — modifier les objectifs persistants (`POST /objectifs`) est réservé au rôle admin, pas à l'opérateur.
+- [Générateur d'Univers](generateur-univers.md) — workflow SD/Civitai indépendant du pipeline cinéma, cloisonné par projet, prompts limités aux croquis techniques.
