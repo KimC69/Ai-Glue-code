@@ -590,9 +590,13 @@ output/projects/[NOM_DU_PROJET]/
 cd agents
 streamlit run streamlit_app.py --server.port 5000
 
-# ou CLI :
+# Entité unique :
 python generateur_univers.py --projet "MonJeu" --nom "Kael" \
   --categorie characters --type "Humain" --description "..."
+
+# Mode scénario (génère toutes les entités automatiquement) :
+python generateur_univers.py --scenario --projet "MonJeu" \
+  --fichier-scenario "output/projects/MonJeu/scenario.md"
 ```
 
 ### Configuration

@@ -46,7 +46,16 @@ python generateur_univers.py \
   --categorie characters \
   --type "Humain" \
   --description "Guerrier aux cheveux blancs, manteau en cuir, cicatrice sous l'œil gauche"
+
+# Mode scénario (génère toutes les entités automatiquement)
+python generateur_univers.py --scenario \
+  --projet "MonFilm" \
+  --fichier-scenario "output/projects/MonFilm/scenario.md"
 ```
+
+Le mode scénario lit un fichier Markdown (ou texte), détecte automatiquement les
+personnages, objets, bâtiments et végétation, puis génère chaque entité l'une
+après l'autre sans intervention.
 
 Options utiles :
 - `--no-sd` : génère uniquement la fiche JSON

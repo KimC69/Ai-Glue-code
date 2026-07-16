@@ -106,51 +106,127 @@ tab_generer, tab_config, tab_explorer = st.tabs(
 
 # ── Onglet : Générer ────────────────────────────────────────────────────────
 with tab_generer:
-    st.header("Générer une entité")
-    with st.form("form_generation"):
-        col_nom, col_cat, col_type = st.columns(3)
-        with col_nom:
-            nom_entite = st.text_input("Nom de l'entité", value="Kael Vorn")
-        with col_cat:
-            categorie = st.selectbox("Catégorie", CATEGORIES)
-        with col_type:
-            type_entite = st.text_input("Type", value="Humain",
-                                        placeholder="Humain, Animal, Insecte, Objet, Plante...")
+    st.header("Générer")
+    mode = st.radio("Mode", ["Une entité", "Depuis un scénario"], horizontal=True)
 
-        description = st.text_area(
-            "Description brute",
-            value="Un ancien chasseur de primes, cheveux blancs, cicatrice sous l'œil gauche, manteau en cuir.",
-            height=120,
-        )
+    col_options1, col_options2 = st.columns(2)
+    with col_options1:
+        activer_sd = st.checkbox("Générer le croquis via Stable Diffusion", value=True)
+        activer_civitai = st.checkbox("Télécharger un modèle Civitai adapté", value=True)
+    with col_options2:
+        activer_decoupe = st.checkbox("Découper le croquis en vues 3D", value=True)
+        model_override = st.text_input("Modèle OpenAI (optionnel)",
+                                       value=st.session_state.cfg.model_openai)
 
-        col_options1, col_options2 = st.columns(2)
-        with col_options1:
-            activer_sd = st.checkbox("Générer le croquis via Stable Diffusion", value=True)
-            activer_civitai = st.checkbox("Télécharger un modèle Civitai adapté", value=True)
-        with col_options2:
-            activer_decoupe = st.checkbox("Découper le croquis en vues 3D", value=True)
-            model_override = st.text_input("Modèle OpenAI (optionnel)",
-                                           value=st.session_state.cfg.model_openai)
+    if mode == "Une entité":
+        with st.form("form_generation"):
+            col_nom, col_cat, col_type = st.columns(3)
+            with col_nom:
+                nom_entite = st.text_input("Nom de l'entité", value="Kael Vorn")
+            with col_cat:
+                categorie = st.selectbox("Catégorie", CATEGORIES)
+            with col_type:
+                type_entite = st.text_input("Type", value="Humain",
+                                            placeholder="Humain, Animal, Insecte, Objet, Plante...")
 
-        submitted = st.form_submit_button("🚀 Lancer la génération", use_container_width=True)
+            description = st.text_area(
+                "Description brute",
+                value="Un ancien chasseur de primes, cheveux blancs, cicatrice sous l'œil gauche, manteau en cuir.",
+                height=120,
+            )
 
-    if submitted:
-        if not nom_entite.strip() or not description.strip():
-            st.error("Le nom et la description sont obligatoires.")
-        else:
+            submitted = st.form_submit_button("🚀 Lancer la génération", use_container_width=True)
+
+        if submitted:
+            if not nom_entite.strip() or not description.strip():
+                st.error("Le nom et la description sont obligatoires.")
+            else:
+                cfg = st.session_state.cfg
+                if model_override.strip():
+                    cfg.model_openai = model_override.strip()
+
+                orchestrateur = OrchestrateurUnivers(cfg)
+                with st.spinner("Génération en cours... Cela peut prendre plusieurs minutes."):
+                    try:
+                        bilan = orchestrateur.executer(
+                            nom_projet=projet["nom"],
+                            nom_entite=nom_entite.strip(),
+                            categorie=categorie,
+                            type_entite=type_entite.strip(),
+                            description=description.strip(),
+                            generer_sd=activer_sd,
+                            generer_decoupe=activer_decoupe,
+                            telecharger_civitai=activer_civitai,
+                        )
+                    except ErreurWorkflowUnivers as e:
+                        st.error(f"Erreur workflow : {e}")
+                        st.stop()
+
+                st.success(f"Génération terminée en {bilan.get('duree_s', 0)}s")
+
+                if bilan.get("fiche"):
+                    with st.expander("📄 Fiche JSON générée"):
+                        st.json(bilan["fiche"]["contenu"])
+
+                if bilan.get("modele", {}).get("success"):
+                    st.info(f"Modèle Civitai : `{bilan['modele']['nom_checkpoint']}`")
+
+                if bilan.get("croquis", {}).get("success"):
+                    chemin_img = bilan["croquis"]["chemin"]
+                    st.image(chemin_img, caption=f"Croquis : {nom_entite}", use_container_width=True)
+
+                if bilan.get("decoupes", {}).get("success"):
+                    st.subheader("Découpes 3D")
+                    vues = bilan["decoupes"].get("vues", {})
+                    cols = st.columns(len(vues))
+                    for col, (nom, chemin) in zip(cols, vues.items()):
+                        col.image(chemin, caption=nom.capitalize(), use_container_width=True)
+
+                if not bilan.get("croquis", {}).get("success") and activer_sd:
+                    st.warning(bilan.get("croquis", {}).get("error", "Échec de la génération d'image."))
+
+    else:  # Mode scénario
+        with st.form("form_scenario"):
+            chemin_scenario = st.text_input(
+                "Chemin du fichier scénario",
+                value=os.path.join(projet["chemin"], "scenario.md"),
+                placeholder="output/projects/MonFilm/scenario.md",
+            )
+            texte_scenario = st.text_area(
+                "Ou collez le scénario ici (remplace le fichier si rempli)",
+                value="",
+                height=200,
+                placeholder="# Mon scénario\n\n## Personnages\n- Kael : ...\n",
+            )
+            submitted_scenario = st.form_submit_button("🎬 Lancer le scénario", use_container_width=True)
+
+        if submitted_scenario:
             cfg = st.session_state.cfg
             if model_override.strip():
                 cfg.model_openai = model_override.strip()
 
+            if not chemin_scenario.strip():
+                st.error("Le chemin du scénario est obligatoire.")
+                st.stop()
+
+            # Si l'utilisateur a collé un texte, on l'écrit dans un fichier temporaire
+            chemin_effectif = chemin_scenario.strip()
+            if texte_scenario.strip():
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".md", delete=False) as f:
+                    f.write(texte_scenario.strip())
+                    chemin_effectif = f.name
+
+            if not os.path.exists(chemin_effectif):
+                st.error(f"Fichier scénario introuvable : {chemin_effectif}")
+                st.stop()
+
             orchestrateur = OrchestrateurUnivers(cfg)
-            with st.spinner("Génération en cours... Cela peut prendre plusieurs minutes."):
+            with st.spinner("Analyse du scénario et génération de toutes les entités... Cela peut prendre plusieurs minutes."):
                 try:
-                    bilan = orchestrateur.executer(
+                    bilan = orchestrateur.executer_scenario(
                         nom_projet=projet["nom"],
-                        nom_entite=nom_entite.strip(),
-                        categorie=categorie,
-                        type_entite=type_entite.strip(),
-                        description=description.strip(),
+                        chemin_scenario=chemin_effectif,
                         generer_sd=activer_sd,
                         generer_decoupe=activer_decoupe,
                         telecharger_civitai=activer_civitai,
@@ -159,28 +235,18 @@ with tab_generer:
                     st.error(f"Erreur workflow : {e}")
                     st.stop()
 
-            st.success(f"Génération terminée en {bilan.get('duree_s', 0)}s")
+            st.success(f"Scénario terminé : {bilan['succes']}/{bilan['total']} entités générées en {bilan.get('duree_s', 0)}s")
+            st.markdown(f"**Style univers :** {bilan.get('style_univers', 'non précisé')}")
 
-            if bilan.get("fiche"):
-                with st.expander("📄 Fiche JSON générée"):
-                    st.json(bilan["fiche"]["contenu"])
-
-            if bilan.get("modele", {}).get("success"):
-                st.info(f"Modèle Civitai : `{bilan['modele']['nom_checkpoint']}`")
-
-            if bilan.get("croquis", {}).get("success"):
-                chemin_img = bilan["croquis"]["chemin"]
-                st.image(chemin_img, caption=f"Croquis : {nom_entite}", use_container_width=True)
-
-            if bilan.get("decoupes", {}).get("success"):
-                st.subheader("Découpes 3D")
-                vues = bilan["decoupes"].get("vues", {})
-                cols = st.columns(len(vues))
-                for col, (nom, chemin) in zip(cols, vues.items()):
-                    col.image(chemin, caption=nom.capitalize(), use_container_width=True)
-
-            if not bilan.get("croquis", {}).get("success") and activer_sd:
-                st.warning(bilan.get("croquis", {}).get("error", "Échec de la génération d'image."))
+            for e in bilan["entites"]:
+                fiche = e["resultat"].get("fiche")
+                status = "✅" if fiche else "❌"
+                with st.expander(f"{status} {e['nom']} ({e['categorie']} / {e['type']})"):
+                    st.markdown(f"**Importance :** {e['raison']}")
+                    if fiche:
+                        st.json(fiche['contenu'])
+                    else:
+                        st.error(e['resultat'].get('error', 'Échec'))
 
 
 # ── Onglet : Configuration ──────────────────────────────────────────────────

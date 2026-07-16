@@ -26,6 +26,7 @@ from .agents.curateur_civitai import CurateurCivitai
 from .agents.prompteur import Prompteur
 from .agents.dessinateur_sd import DessinateurSD
 from .agents.decoupeur_3d import Decoupeur3D
+from .agents.scenariste_univers import ScenaristeUnivers
 
 
 class ErreurWorkflowUnivers(Exception):
@@ -166,3 +167,62 @@ class OrchestrateurUnivers:
         return self.executer(
             nom_projet, nom_entite, categorie, type_entite, description,
             generer_sd=False, generer_decoupe=False, telecharger_civitai=False)
+
+    def executer_scenario(self, nom_projet: str, chemin_scenario: str,
+                          generer_sd: bool = True, generer_decoupe: bool = True,
+                          telecharger_civitai: bool = True) -> dict:
+        """Lance le workflow complet sur toutes les entités extraites d'un scénario.
+
+        Retourne un bilan global avec la liste des entités traitées et les erreurs.
+        """
+        debut_total = time.time()
+        projet = creer_ou_ouvrir(nom_projet)
+        self._log(f"Projet actif : {projet['nom']} ({projet['slug']})")
+        self._log(f"Analyse du scénario : {chemin_scenario}")
+
+        scenariste = ScenaristeUnivers(model=self.config.model_openai)
+        extraction = scenariste.analyser(chemin_scenario)
+
+        self._log(f"Scénario analysé : {extraction.resume}")
+        self._log(f"Entités détectées : {len(extraction.entites)}")
+
+        bilan = {
+            "projet": projet,
+            "resume_scenario": extraction.resume,
+            "style_univers": extraction.style_univers,
+            "total": len(extraction.entites),
+            "succes": 0,
+            "echecs": 0,
+            "entites": [],
+            "duree_s": 0,
+            "etapes": [],
+        }
+
+        for idx, entite in enumerate(extraction.entites, 1):
+            self._log(f"\n[{idx}/{len(extraction.entites)}] {entite.nom} ({entite.categorie})")
+            resultat = self.executer(
+                nom_projet=nom_projet,
+                nom_entite=entite.nom,
+                categorie=entite.categorie,
+                type_entite=entite.type,
+                description=entite.description,
+                generer_sd=generer_sd,
+                generer_decoupe=generer_decoupe,
+                telecharger_civitai=telecharger_civitai,
+            )
+            if resultat.get("fiche"):
+                bilan["succes"] += 1
+            else:
+                bilan["echecs"] += 1
+            bilan["entites"].append({
+                "nom": entite.nom,
+                "categorie": entite.categorie,
+                "type": entite.type,
+                "raison": entite.raison,
+                "resultat": resultat,
+            })
+
+        bilan["duree_s"] = round(time.time() - debut_total, 2)
+        bilan["etapes"] = self.etapes
+        self._log(f"\nScénario terminé : {bilan['succes']}/{bilan['total']} entités générées")
+        return bilan

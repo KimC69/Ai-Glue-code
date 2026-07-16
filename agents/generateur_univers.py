@@ -43,6 +43,10 @@ def main(argv=None):
                         help="Modèle OpenAI (défaut : gpt-4o-mini)")
     parser.add_argument("--lister-projets", action="store_true",
                         help="Liste les projets existants puis quitte")
+    parser.add_argument("--scenario", action="store_true",
+                        help="Mode scénario : génère toutes les entités d'un fichier de scénario")
+    parser.add_argument("--fichier-scenario", default="",
+                        help="Chemin du fichier de scénario (.md ou .txt)")
 
     args = parser.parse_args(argv)
 
@@ -51,7 +55,52 @@ def main(argv=None):
             print(f"  • {p['nom']} ({p['slug']}) — créé le {p['cree_le']}")
         return
 
-    # Validation des arguments obligatoires pour la génération
+    cfg = config_defaut()
+    if args.model:
+        cfg.model_openai = args.model
+
+    orchestrateur = OrchestrateurUnivers(cfg)
+
+    # ── Mode scénario ─────────────────────────────────────────────────────────
+    if args.scenario:
+        if not args.projet.strip():
+            parser.error("--projet est obligatoire en mode --scenario")
+        if not args.fichier_scenario.strip():
+            parser.error("--fichier-scenario est obligatoire en mode --scenario")
+        if not os.path.exists(args.fichier_scenario):
+            print(f"[Erreur] Fichier scénario introuvable : {args.fichier_scenario}")
+            sys.exit(1)
+
+        try:
+            bilan = orchestrateur.executer_scenario(
+                nom_projet=args.projet,
+                chemin_scenario=args.fichier_scenario,
+                generer_sd=not args.no_sd,
+                generer_decoupe=not args.no_decoupe,
+                telecharger_civitai=not args.no_civitai,
+            )
+        except ErreurWorkflowUnivers as e:
+            print(f"[Erreur] {e}")
+            sys.exit(1)
+
+        print("\n" + "=" * 55)
+        print("  🌌 SCÉNARIO TERMINÉ")
+        print("=" * 55)
+        print(f"  Projet       : {bilan['projet']['nom']}")
+        print(f"  Scénario     : {bilan['resume_scenario']}")
+        print(f"  Entités      : {bilan['total']}")
+        print(f"  Succès       : {bilan['succes']}")
+        print(f"  Échecs       : {bilan['echecs']}")
+        print()
+        for e in bilan["entites"]:
+            fiche = e["resultat"].get("fiche")
+            status = "✅" if fiche else "❌"
+            print(f"  {status} {e['nom']} ({e['categorie']} / {e['type']})")
+        print(f"\n  Durée totale : {bilan.get('duree_s', 0)}s")
+        print("=" * 55 + "\n")
+        return
+
+    # ── Mode entité unique ───────────────────────────────────────────────────
     manquants = []
     for arg, label in (("projet", "--projet"), ("nom", "--nom"),
                        ("categorie", "--categorie"), ("type", "--type"),
@@ -61,11 +110,6 @@ def main(argv=None):
     if manquants:
         parser.error("Arguments obligatoires manquants : " + ", ".join(manquants))
 
-    cfg = config_defaut()
-    if args.model:
-        cfg.model_openai = args.model
-
-    orchestrateur = OrchestrateurUnivers(cfg)
     try:
         bilan = orchestrateur.executer(
             nom_projet=args.projet,
